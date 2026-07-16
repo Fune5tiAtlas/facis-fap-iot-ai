@@ -136,30 +136,32 @@ spec:
               //    relative to that root — so /orce/dynamicsrc/* (from
               //    red.min.js's relative URL construction) hits it as
               //    /dynamicsrc/*.
-              const re = /^\s*\};\s*$/gm;
-              let lastBraceIdx = -1;
-              let m;
-              while ((m = re.exec(src)) !== null) lastBraceIdx = m.index;
-              if (lastBraceIdx === -1) {
-                console.error('[init-orce-settings] FAIL: closing `};` not found');
-                process.exit(1);
+              if (!src.includes('httpAdminMiddleware:')) {
+                const re = /^\s*\};\s*$/gm;
+                let lastBraceIdx = -1;
+                let m;
+                while ((m = re.exec(src)) !== null) lastBraceIdx = m.index;
+                if (lastBraceIdx === -1) {
+                  console.error('[init-orce-settings] FAIL: closing `};` not found');
+                  process.exit(1);
+                }
+                const middleware = [
+                  '',
+                  '    // FACIS:dynamicsrc-patch — serve red.min.js\'s relative dynamicsrc/*',
+                  '    // paths (which resolve under /orce/dynamicsrc/* because httpAdminRoot',
+                  '    // is /orce/). The httpStatic block above handles the absolute',
+                  '    // /dynamicsrc/* paths used by guided-style.css.',
+                  '    httpAdminMiddleware: function(req, res, next) {',
+                  '        if (req.path && req.path.indexOf("/dynamicsrc/") === 0) {',
+                  '            var file = req.path.slice("/dynamicsrc/".length).replace(/\\.\\./g, "");',
+                  '            return res.sendFile(file, { root: "/opt/maestro/MBE/.node-red/dynamicsrc" });',
+                  '        }',
+                  '        return next();',
+                  '    },',
+                  ''
+                ].join('\n');
+                src = src.slice(0, lastBraceIdx) + middleware + src.slice(lastBraceIdx);
               }
-              const middleware = [
-                '',
-                '    // FACIS:dynamicsrc-patch — serve red.min.js\'s relative dynamicsrc/*',
-                '    // paths (which resolve under /orce/dynamicsrc/* because httpAdminRoot',
-                '    // is /orce/). The httpStatic block above handles the absolute',
-                '    // /dynamicsrc/* paths used by guided-style.css.',
-                '    httpAdminMiddleware: function(req, res, next) {',
-                '        if (req.path && req.path.indexOf("/dynamicsrc/") === 0) {',
-                '            var file = req.path.slice("/dynamicsrc/".length).replace(/\\.\\./g, "");',
-                '            return res.sendFile(file, { root: "/opt/maestro/MBE/.node-red/dynamicsrc" });',
-                '        }',
-                '        return next();',
-                '    },',
-                ''
-              ].join('\n');
-              src = src.slice(0, lastBraceIdx) + middleware + src.slice(lastBraceIdx);
 
               // Atomic write so a half-written file never reaches Node-RED.
               const tmp = path + '.new';
