@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS DSP — State Bootstrap & Persistence",
     "disabled": false,
-    "info": "Owns the PVC-backed JSON state files for transfers and negotiations.\n\nStartup: read /data/dsp-state/transfers.json and /data/dsp-state/negotiations.json\ninto flow context. On read failure (first boot), initialise empty maps.\n\nMutations on other tabs use `flow.set('transfers'|'negotiations', ...)` synchronously,\nthen fire the `dsp.persist.transfers` or `dsp.persist.negotiations` link with an empty\ntrigger. The receiver re-serialises the latest snapshot to disk (overwrite mode).\n\nSingle-replica only — file-based state is not multi-replica safe.\nWhen Postgres backing is added (out of scope), this tab is replaced wholesale."
+    "info": "Owns the PVC-backed JSON state files for transfers and negotiations.\n\nStartup: read /data/dsp-state/transfers.json and /data/dsp-state/negotiations.json\ninto flow context. On read failure (first boot), initialise empty maps.\n\nMutations on other tabs use `global.set('transfers'|'negotiations', ...)` synchronously,\nthen fire the `dsp.persist.transfers` or `dsp.persist.negotiations` link with an empty\ntrigger. The receiver re-serialises the latest snapshot to disk (overwrite mode).\n\nSingle-replica only — file-based state is not multi-replica safe.\nWhen Postgres backing is added (out of scope), this tab is replaced wholesale."
   },
   {
     "id": "dsp-state-startup",
@@ -130,7 +130,7 @@
     "type": "function",
     "z": "tab-dsp-state",
     "name": "restore negotiations context",
-    "func": "let negotiations = {};\ntry {\n    if (typeof msg.payload === 'string' && msg.payload.length > 0) {\n        negotiations = JSON.parse(msg.payload);\n    } else if (msg.payload && typeof msg.payload === 'object') {\n        negotiations = msg.payload;\n    }\n} catch (err) {\n    node.warn('Failed to parse negotiations.json, starting empty: ' + err.message);\n    negotiations = {};\n}\nflow.set('negotiations', negotiations);\nnode.log('DSP state: ' + Object.keys(negotiations).length + ' negotiation(s) restored');\nreturn null;\n",
+    "func": "let negotiations = {};\ntry {\n    if (typeof msg.payload === 'string' && msg.payload.length > 0) {\n        negotiations = JSON.parse(msg.payload);\n    } else if (msg.payload && typeof msg.payload === 'object') {\n        negotiations = msg.payload;\n    }\n} catch (err) {\n    node.warn('Failed to parse negotiations.json, starting empty: ' + err.message);\n    negotiations = {};\n}\nglobal.set('negotiations', negotiations);\nnode.log('DSP state: ' + Object.keys(negotiations).length + ' negotiation(s) restored');\nreturn null;\n",
     "outputs": 0,
     "timeout": "",
     "noerr": 0,
@@ -163,7 +163,7 @@
     "type": "function",
     "z": "tab-dsp-state",
     "name": "init empty negotiations",
-    "func": "// Initialise the in-memory map AND persist {} to disk on first run —\n// see dsp-init-transfers comment for rationale.\nflow.set('negotiations', {});\nnode.log('DSP state: no negotiations.json yet — initialised empty map');\nreturn {};\n",
+    "func": "// Initialise the in-memory map AND persist {} to disk on first run —\n// see dsp-init-transfers comment for rationale.\nglobal.set('negotiations', {});\nnode.log('DSP state: no negotiations.json yet — initialised empty map');\nreturn {};\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -252,7 +252,7 @@
     "type": "function",
     "z": "tab-dsp-state",
     "name": "serialise negotiations",
-    "func": "const negotiations = flow.get('negotiations') || {};\nreturn {\n    payload: JSON.stringify(negotiations, null, 2),\n    filename: '/data/dsp-state/negotiations.json'\n};\n",
+    "func": "const negotiations = global.get('negotiations') || {};\nreturn {\n    payload: JSON.stringify(negotiations, null, 2),\n    filename: '/data/dsp-state/negotiations.json'\n};\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,

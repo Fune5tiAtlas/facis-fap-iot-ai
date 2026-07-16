@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS DSP — Negotiations",
     "disabled": false,
-    "info": "FR-DSP-002 — Contract Negotiation. Out of scope per SRS §3.2; this is a\nminimal stub that auto-finalises so transfer requests have a valid\nagreementId to reference.\n\n  POST   /dsp/negotiations              — auto-finalise; 202 + {negotiationId}\n  GET    /dsp/negotiations/:id          — return NegotiationProcess; 404 if missing\n  POST   /dsp/negotiations/:id/terminate — set state TERMINATED; 200\n\nID format mirrors Python: neg-<12 lowercase hex>, agr-<12 lowercase hex>.\nState machine: REQUESTED → FINALIZED (immediate) → TERMINATED.\nAfter every mutation, fires dsp.persist.negotiations to checkpoint the\nflow.get('negotiations') map to disk."
+    "info": "FR-DSP-002 — Contract Negotiation. Out of scope per SRS §3.2; this is a\nminimal stub that auto-finalises so transfer requests have a valid\nagreementId to reference.\n\n  POST   /dsp/negotiations              — auto-finalise; 202 + {negotiationId}\n  GET    /dsp/negotiations/:id          — return NegotiationProcess; 404 if missing\n  POST   /dsp/negotiations/:id/terminate — set state TERMINATED; 200\n\nID format mirrors Python: neg-<12 lowercase hex>, agr-<12 lowercase hex>.\nState machine: REQUESTED → FINALIZED (immediate) → TERMINATED.\nAfter every mutation, fires dsp.persist.negotiations to checkpoint the\nglobal.get('negotiations') map to disk."
   },
   {
     "id": "dsp-neg-in-create",
@@ -28,7 +28,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "auto-finalise",
-    "func": "const body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.counterparty || !body.offerId) {\n    msg.statusCode = 422;\n    msg.payload = { detail: 'counterparty and offerId are required' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst negId = 'neg-' + crypto.randomBytes(6).toString('hex');\nconst agrId = 'agr-' + crypto.randomBytes(6).toString('hex');\n\nconst negotiation = {\n    id: negId,\n    state: 'FINALIZED',\n    agreementId: agrId,\n    offerId: body.offerId,\n    counterparty: body.counterparty,\n    createdAt: now,\n    updatedAt: now\n};\n\nconst negs = flow.get('negotiations') || {};\nnegs[negId] = negotiation;\nflow.set('negotiations', negs);\n\nnode.log('Negotiation ' + negId + ' auto-finalised → agreement ' + agrId);\n\nmsg.payload = { negotiationId: negId };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 202;\nreturn [msg, { payload: '' }];\n",
+    "func": "const body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.counterparty || !body.offerId) {\n    msg.statusCode = 422;\n    msg.payload = { detail: 'counterparty and offerId are required' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst negId = 'neg-' + crypto.randomBytes(6).toString('hex');\nconst agrId = 'agr-' + crypto.randomBytes(6).toString('hex');\n\nconst negotiation = {\n    id: negId,\n    state: 'FINALIZED',\n    agreementId: agrId,\n    offerId: body.offerId,\n    counterparty: body.counterparty,\n    createdAt: now,\n    updatedAt: now\n};\n\nconst negs = global.get('negotiations') || {};\nnegs[negId] = negotiation;\nglobal.set('negotiations', negs);\n\nnode.log('Negotiation ' + negId + ' auto-finalised → agreement ' + agrId);\n\nmsg.payload = { negotiationId: negId };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 202;\nreturn [msg, { payload: '' }];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -73,7 +73,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "read by id",
-    "func": "const negs = flow.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst found = negs[id];\nif (!found) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n} else {\n    msg.statusCode = 200;\n    msg.payload = found;\n}\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "func": "const negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst found = negs[id];\nif (!found) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n} else {\n    msg.statusCode = 200;\n    msg.payload = found;\n}\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -110,7 +110,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "terminate",
-    "func": "const negs = flow.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst neg = negs[id];\nif (!neg) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst terminated = Object.assign({}, neg, { state: 'TERMINATED', updatedAt: now });\nnegs[id] = terminated;\nflow.set('negotiations', negs);\n\nmsg.payload = terminated;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: '' }];\n",
+    "func": "const negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst neg = negs[id];\nif (!neg) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst terminated = Object.assign({}, neg, { state: 'TERMINATED', updatedAt: now });\nnegs[id] = terminated;\nglobal.set('negotiations', negs);\n\nmsg.payload = terminated;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: '' }];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
