@@ -11,7 +11,9 @@
     "type": "link in",
     "z": "tab-dsp-iam-verify",
     "name": "← iam.verify (call)",
-    "links": [],
+    "links": [
+      "dsp-neg-iam-call"
+    ],
     "x": 150,
     "y": 120,
     "wires": [
