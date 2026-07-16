@@ -53,7 +53,7 @@ async function verifyPresentation({ vpToken, resolveJwk, audience, trustedIssuer
     }
 
     try {
-        await jose.jwtVerify(vpToken, vpKey, { audience });
+        await jose.jwtVerify(vpToken, vpKey, { audience, currentDate: new Date(nowMs) });
     } catch (err) {
         if (err.code === 'ERR_JWT_EXPIRED') {
             return { ok: false, code: 'token_expired', detail: 'VP expired' };
@@ -105,7 +105,7 @@ async function verifyPresentation({ vpToken, resolveJwk, audience, trustedIssuer
     }
 
     try {
-        await jose.jwtVerify(vc, vcKey);
+        await jose.jwtVerify(vc, vcKey, { currentDate: new Date(nowMs) });
     } catch (err) {
         if (err.code === 'ERR_JWT_EXPIRED') {
             return { ok: false, code: 'token_expired', detail: 'VC expired' };
