@@ -4,7 +4,10 @@
   "private": true,
   "description": "Flow-level tests for the FACIS DSP Connector ORCE flows. Mirrors services/simulation/orce/tests.",
   "scripts": {
-    "test": "node --test flows"
+    "test": "node --test flows/*.spec.js"
+  },
+  "devDependencies": {
+    "jose": "5.10.0"
   },
   "license": "Apache-2.0"
 }
