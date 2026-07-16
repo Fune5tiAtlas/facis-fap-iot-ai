@@ -1,8 +1,9 @@
 # Strategic-merge patch that adds an `init-deps` initContainer to the ORCE
 # Deployment. The container has two responsibilities:
 #
-#   1. Ensure the npm packages required by the Simulation, DSP, and SFTP
-#      ORCE flows are present in the persistent /data/node_modules directory.
+#   1. Ensure the npm packages required by the Simulation, DSP (incl. IAM
+#      verification), and SFTP ORCE flows are present in the persistent
+#      /data/node_modules directory.
 #   2. Overlay the `rdkafka-patch.js` (FACIS SSL/mTLS extensions for
 #      node-red-contrib-rdkafka) over the stock `rdkafka.js` that npm
 #      installs. The stock contrib has no SSL support; the FACIS Stackable
@@ -11,8 +12,8 @@
 # Why this exists:
 #   The shipped image `ecofacis/xfsc-orce:2.0.12` does not bundle
 #   node-red-contrib-modbus, node-red-contrib-rdkafka, ssh2-sftp-client,
-#   csv-parse, or seedrandom — and even when rdkafka is npm-installed, the
-#   stock module silently drops securityProtocol/ssl* fields, leaving the
+#   csv-parse, seedrandom, or jose — and even when rdkafka is npm-installed,
+#   the stock module silently drops securityProtocol/ssl* fields, leaving the
 #   producer in a perpetual "not connected" state. The patched rdkafka.js
 #   (services/simulation/orce/rdkafka-patch.js) wires those fields into the
 #   librdkafka config. Rebuilding the image with both bundled is the long-
@@ -66,7 +67,7 @@ spec:
                 echo "[init-deps] package.json missing - init-data has not run yet; skipping"
                 exit 0
               fi
-              PKGS="node-red-contrib-modbus node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom"
+              PKGS="node-red-contrib-modbus node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom jose@5.10.0"
               MISSING=""
               for p in $PKGS; do
                 if [ ! -d "node_modules/$p" ]; then MISSING="$MISSING $p"; fi
