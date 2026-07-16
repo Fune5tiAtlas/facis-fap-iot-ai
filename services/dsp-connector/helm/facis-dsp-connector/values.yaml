@@ -33,8 +33,18 @@ orceFlowDeploy:
   flowsDir: orce-flows
   # -- Container image used by the deployment Job (must include curl + jq).
   #    alpine/curl has NO jq (verified: `docker run --rm alpine/curl:8.10.0
-  #    sh -c "which jq"` -> MISSING). badouralix/curl-jq:alpine has both,
-  #    pinned by digest since the repo publishes no semver tags.
+  #    sh -c "which jq"` -> MISSING). Considered installing jq at container
+  #    start instead (this repo's own convention — see
+  #    infrastructure/orce/init-deps-patch.yaml), using the real
+  #    `alpine/curl:8.11.1` tag + `apk add --no-cache jq`, but this Job's
+  #    container sets `readOnlyRootFilesystem: true`; verified directly
+  #    (`docker run --rm --read-only alpine/curl:latest sh -c "apk add
+  #    --no-cache jq"`) that apk fails with "Unable to open log: Read-only
+  #    file system" (apk needs to write /etc/apk + /lib/apk/db). Not worth
+  #    loosening readOnlyRootFilesystem for this, so staying on
+  #    badouralix/curl-jq:alpine, which has both tools pre-built and works
+  #    fine read-only. Pinned by digest since the repo publishes no semver
+  #    tags.
   jobImage:
     repository: badouralix/curl-jq
     tag: "alpine@sha256:e1f1e84c4c23c24d665cd9243dcf7fa531965a0b37b89a64cabca847d834dd62"
