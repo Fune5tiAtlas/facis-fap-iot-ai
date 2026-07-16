@@ -12,7 +12,9 @@
     "z": "tab-dsp-iam-verify",
     "name": "← iam.verify (call)",
     "links": [
-      "dsp-neg-iam-call"
+      "dsp-neg-iam-call",
+      "dsp-tx-iam-call",
+      "dsp-tx-list-iam-call"
     ],
     "x": 150,
     "y": 120,
