@@ -69,6 +69,17 @@ dsp:
   # -- Kafka bootstrap servers used in Kafka-streaming access objects.
   #    Connection params only — DSP does not produce data to this Kafka.
   kafkaBootstrap: kafka.provider.example:9092
+  # -- NF-1 Identity & Trust (IAM verifier)
+  iam:
+    # -- off | warn | enforce. Start new environments at "warn" to observe
+    #    real traffic before blocking it; "off" is full pre-NF-1 parity.
+    enforce: "warn"
+    # -- This connector's own did:web identity (the VP's expected `aud`).
+    vpAudience: "did:web:fap-iotai.facis.cloud"
+    # -- Comma-separated allowlist of trusted VC-issuer DIDs.
+    trustedIssuers: ""
+    jtiTtlSeconds: 300
+    didCacheTtlSeconds: 300
 
 # ---------------------------------------------------------------------------
 # State Persistence (orce mode)
