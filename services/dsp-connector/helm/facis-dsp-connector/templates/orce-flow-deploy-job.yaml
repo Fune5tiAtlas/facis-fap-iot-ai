@@ -52,20 +52,64 @@ spec:
               sleep "${PRE_DEPLOY_SLEEP}"
 
               cd /flows
-              # Concatenate every flow JSON file (each is a top-level array)
-              # into a single combined deployment payload.
-              jq -s 'add' *.json > /tmp/combined.json
+              # Per-tab PUT (fallback POST on 404) — NEVER a full-replace
+              # POST /flows. This pod is shared with Simulation/AI-Insight/
+              # SFTP flows; a full-replace deploy from this chart alone would
+              # wipe every other service's tabs (the known destructive-deploy
+              # hazard — see feedback_orce_full_deploy_destructive in
+              # project memory). Deploy one tab object at a time instead.
+              FAILED=0
+              for f in *.json; do
+                TAB_ID=$(jq -r '.[] | select(.type=="tab") | .id' "$f")
+                if [ -z "$TAB_ID" ]; then
+                  echo "[orce-flow-deploy] SKIP $f — no tab object found"
+                  continue
+                fi
+                PAYLOAD=$(jq -c --arg id "$TAB_ID" '
+                  (map(select(.type=="tab" and .id==$id)) | .[0]) as $tab |
+                  {
+                    id: $id,
+                    label: $tab.label,
+                    disabled: ($tab.disabled // false),
+                    info: ($tab.info // ""),
+                    nodes: map(select(.type != "tab"))
+                  }
+                ' "$f")
 
-              echo "[orce-flow-deploy] POST ${ORCE_ADMIN_URL}/flows ($(wc -c </tmp/combined.json) bytes)"
-              curl -sS --fail \
-                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -H "Node-RED-Deployment-Type: full" \
-                -X POST "${ORCE_ADMIN_URL}/flows" \
-                --data @/tmp/combined.json
+                HTTP_CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+                  -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X PUT "${ORCE_ADMIN_URL}/flow/${TAB_ID}" \
+                  --data "$PAYLOAD")
 
-              echo
-              echo "[orce-flow-deploy] deploy ok"
+                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+                  echo "[orce-flow-deploy] PUT $f (tab $TAB_ID) ok ($HTTP_CODE)"
+                elif [ "$HTTP_CODE" = "404" ]; then
+                  echo "[orce-flow-deploy] tab $TAB_ID not found — creating via POST /flow"
+                  CREATE_CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+                    -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -X POST "${ORCE_ADMIN_URL}/flow" \
+                    --data "$PAYLOAD")
+                  if [ "$CREATE_CODE" = "200" ] || [ "$CREATE_CODE" = "201" ]; then
+                    echo "[orce-flow-deploy] POST $f (tab $TAB_ID) created ($CREATE_CODE)"
+                  else
+                    echo "[orce-flow-deploy] FAIL creating $f (tab $TAB_ID): http $CREATE_CODE"
+                    cat /tmp/resp.json
+                    FAILED=1
+                  fi
+                else
+                  echo "[orce-flow-deploy] FAIL updating $f (tab $TAB_ID): http $HTTP_CODE"
+                  cat /tmp/resp.json
+                  FAILED=1
+                fi
+              done
+
+              if [ "$FAILED" = "1" ]; then
+                echo "[orce-flow-deploy] one or more tabs failed to deploy — see above"
+                exit 1
+              fi
+              echo "[orce-flow-deploy] deploy ok (per-tab)"
           volumeMounts:
             - name: flows
               mountPath: /flows

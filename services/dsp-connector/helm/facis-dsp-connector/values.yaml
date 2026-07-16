@@ -31,10 +31,13 @@ orceFlowDeploy:
   # -- Sub-path under the chart's `files/` directory containing flow JSON.
   #    Populate via `services/dsp-connector/helm/facis-dsp-connector/sync-flows.sh`.
   flowsDir: orce-flows
-  # -- Container image used by the deployment Job (must include curl + jq)
+  # -- Container image used by the deployment Job (must include curl + jq).
+  #    alpine/curl has NO jq (verified: `docker run --rm alpine/curl:8.10.0
+  #    sh -c "which jq"` -> MISSING). badouralix/curl-jq:alpine has both,
+  #    pinned by digest since the repo publishes no semver tags.
   jobImage:
-    repository: alpine/curl
-    tag: "8.10.1"
+    repository: badouralix/curl-jq
+    tag: "alpine@sha256:e1f1e84c4c23c24d665cd9243dcf7fa531965a0b37b89a64cabca847d834dd62"
     pullPolicy: IfNotPresent
   # -- Optional initial wait for the ORCE pod readiness probe (seconds)
   preDeploySleepSeconds: 5
