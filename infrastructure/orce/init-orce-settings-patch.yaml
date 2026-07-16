@@ -86,20 +86,22 @@ spec:
               //    /dynamicsrc/*. This catches guided-style.css's absolute
               //    `url("/dynamicsrc/font/...")` references that the
               //    /orce/dynamicsrc Ingress rewrite previously handled.
-              const before = "httpStatic: '/data',";
-              const after = [
-                "// FACIS:dynamicsrc-patch — httpStatic expanded to also serve editor theme",
-                "    // assets at /dynamicsrc/* (replaces the /orce/dynamicsrc Ingress rewrite).",
-                "    httpStatic: [",
-                "        { path: '/data', root: '/' },",
-                "        { path: '/opt/maestro/MBE/.node-red/dynamicsrc', root: '/dynamicsrc' }",
-                "    ],",
-              ].join('\n    ');
-              if (!src.includes(before)) {
-                console.error('[init-orce-settings] FAIL: expected httpStatic line not found in settings.js');
-                process.exit(1);
+              if (!src.includes(MARKER)) {
+                const before = "httpStatic: '/data',";
+                const after = [
+                  "// FACIS:dynamicsrc-patch — httpStatic expanded to also serve editor theme",
+                  "    // assets at /dynamicsrc/* (replaces the /orce/dynamicsrc Ingress rewrite).",
+                  "    httpStatic: [",
+                  "        { path: '/data', root: '/' },",
+                  "        { path: '/opt/maestro/MBE/.node-red/dynamicsrc', root: '/dynamicsrc' }",
+                  "    ],",
+                ].join('\n    ');
+                if (!src.includes(before)) {
+                  console.error('[init-orce-settings] FAIL: expected httpStatic line not found in settings.js');
+                  process.exit(1);
+                }
+                src = src.replace(before, after);
               }
-              src = src.replace(before, after);
 
               // 1b. Enable functionExternalModules so function nodes can
               //     declare libs: [{var:'jose', module:'jose'}] etc. Off by
@@ -112,11 +114,17 @@ spec:
                 } else if (!/functionExternalModules\s*:/.test(src)) {
                   // Setting absent entirely (common — it defaults off and is
                   // often omitted from settings.js templates). Inject right
-                  // after the httpStatic array we just wrote.
-                  src = src.replace(
-                    "    ],\n",
-                    "    ],\n    functionExternalModules: true, // FACIS:iam-verify-patch\n"
-                  );
+                  // after the httpStatic array we just wrote. Search from the
+                  // httpStatic marker to anchor to the correct closing bracket.
+                  const httpStaticMarkerIdx = src.indexOf("// FACIS:dynamicsrc-patch");
+                  if (httpStaticMarkerIdx !== -1) {
+                    const closingBracketIdx = src.indexOf("    ],\n", httpStaticMarkerIdx);
+                    if (closingBracketIdx !== -1) {
+                      src = src.slice(0, closingBracketIdx + 7) +
+                            "    functionExternalModules: true, // FACIS:iam-verify-patch\n" +
+                            src.slice(closingBracketIdx + 7);
+                    }
+                  }
                 }
               }
 
