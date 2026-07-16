@@ -76,31 +76,35 @@ spec:
                   }
                 ' "$f")
 
-                HTTP_CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+                RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
                   -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
                   -H "Content-Type: application/json" \
                   -X PUT "${ORCE_ADMIN_URL}/flow/${TAB_ID}" \
                   --data "$PAYLOAD")
+                HTTP_CODE=$(printf '%s' "$RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
+                BODY=$(printf '%s' "$RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
 
                 if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
                   echo "[orce-flow-deploy] PUT $f (tab $TAB_ID) ok ($HTTP_CODE)"
                 elif [ "$HTTP_CODE" = "404" ]; then
                   echo "[orce-flow-deploy] tab $TAB_ID not found — creating via POST /flow"
-                  CREATE_CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+                  CREATE_RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
                     -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
                     -H "Content-Type: application/json" \
                     -X POST "${ORCE_ADMIN_URL}/flow" \
                     --data "$PAYLOAD")
+                  CREATE_CODE=$(printf '%s' "$CREATE_RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
+                  CREATE_BODY=$(printf '%s' "$CREATE_RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
                   if [ "$CREATE_CODE" = "200" ] || [ "$CREATE_CODE" = "201" ]; then
                     echo "[orce-flow-deploy] POST $f (tab $TAB_ID) created ($CREATE_CODE)"
                   else
                     echo "[orce-flow-deploy] FAIL creating $f (tab $TAB_ID): http $CREATE_CODE"
-                    cat /tmp/resp.json
+                    echo "$CREATE_BODY"
                     FAILED=1
                   fi
                 else
                   echo "[orce-flow-deploy] FAIL updating $f (tab $TAB_ID): http $HTTP_CODE"
-                  cat /tmp/resp.json
+                  echo "$BODY"
                   FAILED=1
                 fi
               done
