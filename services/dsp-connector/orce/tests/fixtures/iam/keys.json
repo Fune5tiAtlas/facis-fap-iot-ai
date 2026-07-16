@@ -1,0 +1,47 @@
+{
+  "holder": {
+    "publicJwk": {
+      "kty": "EC",
+      "x": "8iYb4IljGHWEm3dJ3obMl14Kmsh9DpUW10KlYwm8m3U",
+      "y": "LoioS4D-aOWiAFpBHBT8NPU4RLObmAVF40QmK0urohs",
+      "crv": "P-256"
+    },
+    "privateJwk": {
+      "kty": "EC",
+      "x": "8iYb4IljGHWEm3dJ3obMl14Kmsh9DpUW10KlYwm8m3U",
+      "y": "LoioS4D-aOWiAFpBHBT8NPU4RLObmAVF40QmK0urohs",
+      "crv": "P-256",
+      "d": "Ttn0CeRw373Bg3siknoie1e1xNuT7828K24QGARXs5k"
+    }
+  },
+  "issuer": {
+    "publicJwk": {
+      "kty": "EC",
+      "x": "bx89k7QGUPakZ6VgsD7Th5dT0AVfttcGMhWkhi9C3zE",
+      "y": "LGPUpHvoc6n9OTlXxT9wY8aL7kzRry8B6NIav9NsZg8",
+      "crv": "P-256"
+    },
+    "privateJwk": {
+      "kty": "EC",
+      "x": "bx89k7QGUPakZ6VgsD7Th5dT0AVfttcGMhWkhi9C3zE",
+      "y": "LGPUpHvoc6n9OTlXxT9wY8aL7kzRry8B6NIav9NsZg8",
+      "crv": "P-256",
+      "d": "CkWMKMgiszpIeBQ7pwqRuGdnD1qaPyjeJJL6Ot5yR5U"
+    }
+  },
+  "untrustedIssuer": {
+    "publicJwk": {
+      "kty": "EC",
+      "x": "o1rmXcHlsFbRFia5AGHhb2EaM_RdTHLLRLq9uAaJbu4",
+      "y": "JoiierjQ9jEGm1LXtkBL5_RK6JenX59iOaWoxs4abUQ",
+      "crv": "P-256"
+    },
+    "privateJwk": {
+      "kty": "EC",
+      "x": "o1rmXcHlsFbRFia5AGHhb2EaM_RdTHLLRLq9uAaJbu4",
+      "y": "JoiierjQ9jEGm1LXtkBL5_RK6JenX59iOaWoxs4abUQ",
+      "crv": "P-256",
+      "d": "VfJkqL_bNxaKRbLp2t-TRB6LJk_Jh51XtrYWcb7zWds"
+    }
+  }
+}
