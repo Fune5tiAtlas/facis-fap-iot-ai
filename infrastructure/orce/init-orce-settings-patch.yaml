@@ -1,7 +1,8 @@
 # Strategic-merge patch that adds an `init-orce-settings` initContainer to the
 # ORCE Deployment. The container patches /data/settings.js (on the persistent
 # orce-data PVC) so Node-RED's own static-serving hooks handle requests for
-# editor theme assets under `/dynamicsrc/*` and `/orce/dynamicsrc/*`.
+# editor theme assets under `/dynamicsrc/*` and `/orce/dynamicsrc/*`, and
+# enables `functionExternalModules` for NF-1 IAM verifier's jose dependency.
 #
 # Why this exists:
 #   The customised Node-RED editor's red.min.js (read-only at
@@ -24,6 +25,7 @@
 #         when a request hits the admin tree at `/orce/dynamicsrc/*` (which
 #         arrives as req.path === '/dynamicsrc/...' because httpAdminRoot is
 #         '/orce/').
+#     (c) (2026-07) also enables functionExternalModules for the NF-1 IAM verifier's jose dependency.
 #
 #   Phase 1 (this patch) lands with the Ingress still active — the patch is
 #   harmless when the Ingress is also serving the routes, since Node-RED's
@@ -32,8 +34,8 @@
 #   has been verified to load cleanly with this patch alone.
 #
 # Behaviour:
-#   - Idempotent: detects an existing FACIS:dynamicsrc-patch marker comment
-#     in settings.js and exits cleanly when re-running on a patched pod.
+#   - Idempotent: detects existing FACIS:dynamicsrc-patch and FACIS:iam-verify-patch
+#     marker comments in settings.js and exits cleanly when all patches are applied.
 #   - Atomic: writes settings.js.new and renames over the original so a
 #     crash mid-patch leaves the original intact.
 #   - Tolerant: any failure logs and exits non-zero; init-data has already
@@ -72,8 +74,9 @@ spec:
               const fs = require('fs');
               const path = '/mnt/orce-data/settings.js';
               const MARKER = 'FACIS:dynamicsrc-patch';
+              const IAM_MARKER = 'FACIS:iam-verify-patch';
               let src = fs.readFileSync(path, 'utf8');
-              if (src.includes(MARKER)) {
+              if (src.includes(MARKER) && src.includes(IAM_MARKER)) {
                 console.log('[init-orce-settings] already applied');
                 process.exit(0);
               }
@@ -97,6 +100,25 @@ spec:
                 process.exit(1);
               }
               src = src.replace(before, after);
+
+              // 1b. Enable functionExternalModules so function nodes can
+              //     declare libs: [{var:'jose', module:'jose'}] etc. Off by
+              //     default in Node-RED; required for FACIS:iam-verify-patch.
+              if (!src.includes(IAM_MARKER)) {
+                const feBefore = /functionExternalModules\s*:\s*false/;
+                const feAfter = "functionExternalModules: true, // FACIS:iam-verify-patch";
+                if (feBefore.test(src)) {
+                  src = src.replace(feBefore, feAfter);
+                } else if (!/functionExternalModules\s*:/.test(src)) {
+                  // Setting absent entirely (common — it defaults off and is
+                  // often omitted from settings.js templates). Inject right
+                  // after the httpStatic array we just wrote.
+                  src = src.replace(
+                    "    ],\n",
+                    "    ],\n    functionExternalModules: true, // FACIS:iam-verify-patch\n"
+                  );
+                }
+              }
 
               // 2. Inject httpAdminMiddleware just before module.exports's
               //    closing `};`. Walks the file to find the LAST line of the
