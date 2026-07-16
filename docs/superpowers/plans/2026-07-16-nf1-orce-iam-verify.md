@@ -622,7 +622,9 @@ test('verifyPresentation: replayed jti on second call → replay_detected', asyn
 });
 ```
 
-- [ ] **Step 2: Add `jose` as a devDependency and install**
+- [ ] **Step 2: Add `jose` as a devDependency, install, and fix the `test` script for this environment's Node**
+
+Baseline check (run before this plan's implementation started) found that `node --test flows` (the script as it exists today) fails with `Cannot find module '.../tests/flows'` on Node v24.18.0 — this Node version's test runner does not recurse into a bare directory argument the way the script assumes. The explicit glob `node --test flows/*.spec.js` was confirmed to run all 45 pre-existing tests cleanly. Fix the script here since this file is already being edited for the `jose` devDependency:
 
 Edit `services/dsp-connector/orce/tests/package.json`:
 
@@ -633,7 +635,7 @@ Edit `services/dsp-connector/orce/tests/package.json`:
   "private": true,
   "description": "Flow-level tests for the FACIS DSP Connector ORCE flows. Mirrors services/simulation/orce/tests.",
   "scripts": {
-    "test": "node --test flows"
+    "test": "node --test flows/*.spec.js"
   },
   "devDependencies": {
     "jose": "5.9.6"
@@ -641,6 +643,8 @@ Edit `services/dsp-connector/orce/tests/package.json`:
   "license": "Apache-2.0"
 }
 ```
+
+Every other "Run: `node --test flows/<file>.spec.js`" command elsewhere in this plan already names explicit files and is unaffected by this bug. Only the bare `npm test` / `node --test flows` invocations (Task 9 Step 3) depend on this fix.
 
 Run: `cd services/dsp-connector/orce/tests && npm install`
 Expected: `jose` installed, no vulnerabilities of note (it's dependency-free).
