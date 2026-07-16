@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS DSP — State Bootstrap & Persistence",
     "disabled": false,
-    "info": "Owns the PVC-backed JSON state files for transfers and negotiations.\n\nStartup: read /data/dsp-state/transfers.json and /data/dsp-state/negotiations.json\ninto flow context. On read failure (first boot), initialise empty maps.\n\nMutations on other tabs use `global.set('transfers'|'negotiations', ...)` synchronously,\nthen fire the `dsp.persist.transfers` or `dsp.persist.negotiations` link with an empty\ntrigger. The receiver re-serialises the latest snapshot to disk (overwrite mode).\n\nSingle-replica only — file-based state is not multi-replica safe.\nWhen Postgres backing is added (out of scope), this tab is replaced wholesale."
+    "info": "Owns the PVC-backed JSON state files for transfers and negotiations.\n\nStartup: read /data/dsp-state/transfers.json and /data/dsp-state/negotiations.json\ninto flow context. On read failure (first boot), initialise empty maps.\n\nMutations on other tabs: transfers use `flow.set('transfers', ...)` (per-tab context);\nnegotiations use `global.set('negotiations', ...)` (pod-wide context). Both then fire their\nrespective `dsp.persist.transfers` or `dsp.persist.negotiations` link with an empty trigger.\nThe receiver re-serialises the latest snapshot to disk (overwrite mode).\n\nSingle-replica only — file-based state is not multi-replica safe.\nWhen Postgres backing is added (out of scope), this tab is replaced wholesale."
   },
   {
     "id": "dsp-state-startup",
