@@ -1,0 +1,19 @@
+{{- if and (eq (default "orce" .Values.compatibilityMode) "orce") .Values.dsp.iam.mongo.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-mongo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: identity-hub-mongo
+spec:
+  clusterIP: None
+  ports:
+    - port: 27017
+      targetPort: mongo
+      name: mongo
+  selector:
+    {{- include "facis-dsp-connector.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: identity-hub-mongo
+{{- end }}

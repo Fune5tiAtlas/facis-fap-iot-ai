@@ -2,8 +2,8 @@
 # Deployment. The container has two responsibilities:
 #
 #   1. Ensure the npm packages required by the Simulation, DSP (incl. IAM
-#      verification), and SFTP ORCE flows are present in the persistent
-#      /data/node_modules directory.
+#      verification and DSP identity issuance), and SFTP ORCE flows are
+#      present in the persistent /data/node_modules directory.
 #   2. Overlay the `rdkafka-patch.js` (FACIS SSL/mTLS extensions for
 #      node-red-contrib-rdkafka) over the stock `rdkafka.js` that npm
 #      installs. The stock contrib has no SSL support; the FACIS Stackable
@@ -12,12 +12,20 @@
 # Why this exists:
 #   The shipped image `ecofacis/xfsc-orce:2.0.12` does not bundle
 #   node-red-contrib-modbus, node-red-contrib-rdkafka, ssh2-sftp-client,
-#   csv-parse, seedrandom, or jose — and even when rdkafka is npm-installed,
+#   csv-parse, seedrandom, jose, jsonld, @gaia-x/json-web-signature-2020, or
+#   node-red-contrib-mongodb4 — and even when rdkafka is npm-installed,
 #   the stock module silently drops securityProtocol/ssl* fields, leaving the
 #   producer in a perpetual "not connected" state. The patched rdkafka.js
 #   (services/simulation/orce/rdkafka-patch.js) wires those fields into the
 #   librdkafka config. Rebuilding the image with both bundled is the long-
 #   term answer; this patch is the runtime self-heal.
+#
+#   jsonld + @gaia-x/json-web-signature-2020 back the new DSP identity
+#   issuance flow (JSON-LD canonicalization + Gaia-X Compliance-compatible
+#   Verifiable Credential signing for this connector's own did:web
+#   Participant credential). node-red-contrib-mongodb4 backs the Identity
+#   Hub's credential/status-list storage (see the new mongo StatefulSet in
+#   services/dsp-connector/helm/facis-dsp-connector/templates/).
 #
 # Inputs:
 #   - ConfigMap `facis-orce-rdkafka-patch` in namespace `orce` with a single
@@ -67,7 +75,7 @@ spec:
                 echo "[init-deps] package.json missing - init-data has not run yet; skipping"
                 exit 0
               fi
-              PKGS="node-red-contrib-modbus node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom jose@5.10.0"
+              PKGS="node-red-contrib-modbus node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom jose@5.10.0 jsonld@9.0.0 @gaia-x/json-web-signature-2020@2.3.0 node-red-contrib-mongodb4@3.4.0"
               MISSING=""
               for p in $PKGS; do
                 if [ ! -d "node_modules/$p" ]; then MISSING="$MISSING $p"; fi
