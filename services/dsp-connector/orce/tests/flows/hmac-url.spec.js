@@ -148,19 +148,27 @@ test('trailing slash on base URL is stripped', () => {
               'expected single slash; got: ' + out.url);
 });
 
-test('agreementId and roles are bound into the canonical message and reject on tamper', () => {
-    const transfer = { assetId: 'dataset:x', agreementId: 'agr-abc123', parameters: {} };
+test('agreementId is bound into the signature: different agreementId yields a different token', () => {
+    // Discriminator: call the real provisionHttpPull() twice with identical inputs
+    // except agreementId. If the implementation ever regresses to excluding
+    // agreementId from the canonical message, both tokens would be identical
+    // and this assertion would correctly fail.
+    const base = { assetId: 'dataset:x', parameters: {} };
     const opts = { secret: 'test-secret', baseUrl: 'https://data.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: ['consumer', 'analyst'] };
-    const result = provisionHttpPull(transfer, opts);
-    assert.match(result.url, /agreementId=agr-abc123/);
-    assert.match(result.url, /roles=analyst%2Cconsumer/); // sorted: analyst before consumer
-    // Tamper: swap agreementId in the URL without re-signing — a verifier recomputing
-    // the HMAC over the ORIGINAL agreementId would reject the tampered token, proving
-    // the field is actually part of the signed message, not just decorative.
-    const tamperedMessage = 'GET:/api/data/dataset:x::' + result.expiresAt + ':agr-DIFFERENT:analyst,consumer';
-    const tamperedToken = crypto.createHmac('sha256', Buffer.from('test-secret', 'utf8'))
-        .update(tamperedMessage, 'utf8').digest('hex');
-    assert.notEqual(tamperedToken, result.token);
+    const a = provisionHttpPull({ ...base, agreementId: 'agr-abc123' }, opts);
+    const b = provisionHttpPull({ ...base, agreementId: 'agr-DIFFERENT' }, opts);
+    assert.notEqual(a.token, b.token,
+        'expected different agreementId to produce a different token — agreementId must be part of the signed message');
+});
+
+test('roles are bound into the signature: different roles yield a different token', () => {
+    // Same discriminator applied to roles.
+    const transfer = { assetId: 'dataset:x', agreementId: 'agr-abc123', parameters: {} };
+    const base = { secret: 'test-secret', baseUrl: 'https://data.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z') };
+    const a = provisionHttpPull(transfer, { ...base, roles: ['consumer', 'analyst'] });
+    const b = provisionHttpPull(transfer, { ...base, roles: ['consumer'] });
+    assert.notEqual(a.token, b.token,
+        'expected different roles to produce a different token — roles must be part of the signed message');
 });
 
 test('roles are sorted for deterministic signing regardless of input order', () => {
