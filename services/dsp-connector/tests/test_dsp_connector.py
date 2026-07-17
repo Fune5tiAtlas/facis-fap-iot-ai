@@ -207,6 +207,41 @@ class TestTransferProcess:
         assert "agreementId=agr-test%3Aspecial" in access["url"]
         assert "agreementId=agr-test:special" not in access["url"]
 
+    def test_access_url_matches_encode_uri_component_for_divergent_chars(
+        self, client: TestClient
+    ) -> None:
+        # Python's urllib.parse.quote() and JS's encodeURIComponent() disagree
+        # on the default "safe" set: quote() leaves '/' unescaped but escapes
+        # "!*'()"; encodeURIComponent does the exact opposite. The fix
+        # (safe="!*'()") must reproduce encodeURIComponent's behavior: '/'
+        # gets percent-encoded, and '(' / ')' are left literal.
+        create_resp = client.post(
+            "/dsp/transfers",
+            json={
+                "agreementId": "agr/test(id)",
+                "assetId": "dataset:facis:weather-hourly",
+                "format": "http-pull",
+                "parameters": {
+                    "windowFrom": "2026-04-01T00:00:00Z",
+                    "windowTo": "2026-04-07T00:00:00Z",
+                },
+            },
+        )
+        assert create_resp.status_code == 202
+        transfer_id = create_resp.json()["transferId"]
+
+        get_resp = client.get(f"/dsp/transfers/{transfer_id}")
+        assert get_resp.status_code == 200
+        access = get_resp.json()["access"]
+        # '/' must be percent-encoded (matches encodeURIComponent, diverges
+        # from quote()'s default safe='/')
+        assert "agreementId=agr%2Ftest(id)" in access["url"]
+        assert "agreementId=agr/test" not in access["url"]
+        # '(' and ')' must stay literal (matches encodeURIComponent, diverges
+        # from quote()'s default which would escape them to %28/%29)
+        assert "%28" not in access["url"]
+        assert "%29" not in access["url"]
+
     def test_kafka_streaming_transfer(self, client: TestClient) -> None:
         create_resp = client.post(
             "/dsp/transfers",

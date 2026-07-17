@@ -165,7 +165,11 @@ class TransferStore:
         field can't make two different (agreementId, roles) pairs collide
         on the same signed message. Must stay byte-for-byte in lockstep
         with the JS/ORCE twin (facis-dsp-transfers.json), which uses
-        encodeURIComponent — equivalent to urllib.parse.quote here.
+        encodeURIComponent. quote()'s default safe set differs from
+        encodeURIComponent (quote leaves '/' unescaped and escapes
+        "!*'()"; encodeURIComponent does the opposite), so
+        safe="!*'()" is required to make the two byte-for-byte
+        equivalent for all inputs.
         """
         path = f"/api/data/{transfer.assetId}"
         from_ts = transfer.parameters.get("windowFrom", "")
@@ -173,8 +177,8 @@ class TransferStore:
         expires_at = (
             datetime.now(UTC) + timedelta(seconds=self._default_ttl_seconds)
         ).isoformat()
-        agreement_id = quote(transfer.agreementId)
-        roles = quote("")
+        agreement_id = quote(transfer.agreementId, safe="!*'()")
+        roles = quote("", safe="!*'()")
 
         # HMAC-SHA256 over canonical message
         message = f"GET:{path}:{from_ts}:{to_ts}:{expires_at}:{agreement_id}:{roles}"
