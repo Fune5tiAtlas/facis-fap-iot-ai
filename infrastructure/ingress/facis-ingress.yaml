@@ -126,6 +126,17 @@ spec:
                 name: orce
                 port:
                   number: 1880
+          # OID4VCI issuer discovery: static issuer metadata (credential
+          # endpoint + supported credential types) for this connector's own
+          # Participant VC issuance surface — served by
+          # facis-dsp-iam-issuance.json's dsp-iam-issuance-oidc-meta-fn.
+          - path: /.well-known/openid-credential-issuer
+            pathType: Exact
+            backend:
+              service:
+                name: orce
+                port:
+                  number: 1880
           # DSP Identity Hub query API + OID4VCI issuer surface (NF-1
           # follow-on) — see services/dsp-connector/README.md.
           - path: /iam
