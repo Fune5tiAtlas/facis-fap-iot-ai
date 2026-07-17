@@ -5,8 +5,10 @@
 // msg.identity is null (which is what dsp-iam-prep guarantees in off mode).
 //
 // Also proves the ownership-mismatch gate on dsp-tx-agreement-check applies
-// in BOTH warn and enforce modes (msg._iamMode !== 'off'), per the Task 8
-// fix — only 'off' bypasses the ownership check.
+// in BOTH warn and enforce modes (msg._iamMode !== 'off'), but only once
+// identity has actually resolved to a DID (Task 12 fix) — a null identity
+// (unconfigured trustedIssuers, or a warn-mode failure logged-and-allowed)
+// must never block; only 'off' unconditionally bypasses the check.
 //
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -26,39 +28,49 @@ test('enforce mode: identity present → counterparty is the verified DID, body 
     assert.equal(result, 'did:web:verified.example');
 });
 
-// Mirrors dsp-tx-agreement-check exactly (post-Task-8 fix): ownership-mismatch
-// is gated on `iamMode !== 'off'`, so it applies in both 'warn' and 'enforce' —
-// only 'off' bypasses it.
-function agreementCheck(iamMode, negotiations, agreementId, callerDid) {
+// Mirrors dsp-tx-agreement-check exactly (post-Task-12 fix): ownership-mismatch
+// is gated on `iamMode !== 'off'` AND a *resolved* identity (identity.did present).
+// `identity` mirrors msg.identity: null when verification hasn't produced a DID
+// (unconfigured trustedIssuers, or a warn-mode VP/VC failure that was logged and
+// allowed through), or { did } when it has. Only a resolved, non-matching DID is a
+// confident-enough mismatch to reject — even in warn mode. A null identity must
+// never block, in any non-off mode, per the tab's "warn never blocks" contract.
+function agreementCheck(iamMode, negotiations, agreementId, identity) {
     if (iamMode === 'off') return { ok: true };
     const neg = Object.values(negotiations).find(n => n.agreementId === agreementId);
     if (!neg) return { ok: false, code: 'agreement_not_found' };
     if (neg.state !== 'FINALIZED') return { ok: false, code: 'agreement_not_finalized' };
-    if (iamMode !== 'off' && neg.counterparty !== callerDid) return { ok: false, code: 'agreement_not_held_by_caller' };
+    if (iamMode !== 'off' && identity && identity.did && neg.counterparty !== identity.did) return { ok: false, code: 'agreement_not_held_by_caller' };
     return { ok: true };
 }
 
 test('off mode: agreement check always passes regardless of ownership', () => {
-    const r = agreementCheck('off', {}, 'agr-nonexistent', 'did:web:anyone.example');
+    const r = agreementCheck('off', {}, 'agr-nonexistent', { did: 'did:web:anyone.example' });
     assert.equal(r.ok, true);
 });
 
 test('enforce mode: agreement check rejects a caller who does not hold the agreement', () => {
     const negs = { 'neg-1': { agreementId: 'agr-1', state: 'FINALIZED', counterparty: 'did:web:owner.example' } };
-    const r = agreementCheck('enforce', negs, 'agr-1', 'did:web:someone-else.example');
+    const r = agreementCheck('enforce', negs, 'agr-1', { did: 'did:web:someone-else.example' });
     assert.equal(r.ok, false);
     assert.equal(r.code, 'agreement_not_held_by_caller');
 });
 
 test('enforce mode: agreement check passes for the actual owner', () => {
     const negs = { 'neg-1': { agreementId: 'agr-1', state: 'FINALIZED', counterparty: 'did:web:owner.example' } };
-    const r = agreementCheck('enforce', negs, 'agr-1', 'did:web:owner.example');
+    const r = agreementCheck('enforce', negs, 'agr-1', { did: 'did:web:owner.example' });
     assert.equal(r.ok, true);
 });
 
-test('warn mode: agreement check ALSO rejects a caller who does not hold the agreement', () => {
+test('warn mode: agreement check ALSO rejects a caller with a resolved, non-matching identity', () => {
     const negs = { 'neg-1': { agreementId: 'agr-1', state: 'FINALIZED', counterparty: 'did:web:owner.example' } };
-    const r = agreementCheck('warn', negs, 'agr-1', 'did:web:someone-else.example');
+    const r = agreementCheck('warn', negs, 'agr-1', { did: 'did:web:someone-else.example' });
     assert.equal(r.ok, false);
     assert.equal(r.code, 'agreement_not_held_by_caller');
+});
+
+test('warn mode: agreement check passes through when identity is null (unconfigured/failed verification never blocks in warn)', () => {
+    const negs = { 'neg-1': { agreementId: 'agr-1', state: 'FINALIZED', counterparty: 'did:web:owner.example' } };
+    const r = agreementCheck('warn', negs, 'agr-1', null);
+    assert.equal(r.ok, true);
 });
