@@ -1,0 +1,262 @@
+[
+  {
+    "id": "tab-dsp-iam-issuance",
+    "type": "tab",
+    "label": "FACIS DSP — IAM Issuance",
+    "disabled": false,
+    "info": "NF-1 follow-on: this connector's own did:web identity, Participant\nVC self-issuance, and a minimal OID4VCI issuer surface.\n\nGET /.well-known/did.json                  — this connector's did:web document\nGET /.well-known/openid-credential-issuer  — static OID4VCI issuer metadata\nPOST /iam/oid4vci/credential               — issues a fresh self-signed\n                                              Participant VC (jwt_vc_json),\n                                              Bearer-guarded\n\nAdapted from the Partner Onboarding (Reference FAP)'s\n\"4-create did,chain files.json\" (did:web + JWK build — note the two-entry\n@context array, formally required for JsonWebKey2020), \"8-create VCs.json\"\n(JOSE VC signing + GXDCH notary/compliance calls), and \"9-create VP.json\"\n(GXDCH compliance hand-off). The private key is NEVER generated on the pod:\nit is read from env.get('DSP_CONNECTOR_KEY'), pre-provisioned via the\nkeySecret Secret (Task 8's Helm work). Issued VCs are pushed onto\nglobal.get('identityHubPending') — an in-memory handoff queue Task 13's\nhub tab drains and persists to Mongo; this tab only issues.\n\nSee orce/tests/flows/iam-issuance-did.spec.js for the mirrored pure logic\ndsp-iam-issuance-did-fn's DID-document builder must stay consistent with."
+  },
+  {
+    "id": "dsp-iam-issuance-did-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-issuance",
+    "name": "GET /.well-known/did.json",
+    "url": "/.well-known/did.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-iam-issuance-did-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-did-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "build + serve did.json",
+    "func": "// Serves this connector's own did:web document.\n//\n// Ported from Reference FAP \"4-create did,chain files.json\" node\n// cf6fa8ed568dee0a (\"Build DID Document (did:web, strict)\") — adapted to\n// (a) read the pre-provisioned private JWK from env.get('DSP_CONNECTOR_KEY')\n// instead of generating/loading one from Mongo, (b) use\n// env.get('DSP_CONNECTOR_DID') instead of a per-onboarding-record domain,\n// (c) carry the SAME two-entry @context array\n// ([\"https://www.w3.org/ns/did/v1\", \"https://w3id.org/security/suites/jws-2020/v1\"])\n// that node uses — Task 10's iam-issuance-did.spec.js proved the document\n// SHAPE with a one-entry array; this real, externally-served did.json needs\n// the second entry since it formally defines JsonWebKey2020.\n//\n// Public-JWK derivation mirrors Reference FAP tab 4's own\n// \"KEY → JWK private+public\" node (1af2bb2509c14866): export the full JWK\n// via jose, then manually strip the private components — jose.exportJWK has\n// no \"public-only\" mode of its own, so this stripping step is required even\n// though we already hold the private JWK directly (no PEM decode needed here\n// since DSP_CONNECTOR_KEY is provisioned as JWK, not PEM).\nfunction buildDidDocument(did, publicJwk, kid) {\n    return {\n        '@context': [\n            'https://www.w3.org/ns/did/v1',\n            'https://w3id.org/security/suites/jws-2020/v1'\n        ],\n        id: did,\n        verificationMethod: [{\n            id: kid,\n            type: 'JsonWebKey2020',\n            controller: did,\n            publicKeyJwk: publicJwk\n        }],\n        authentication: [kid],\n        assertionMethod: [kid]\n    };\n}\n\nfunction fail(msg, statusCode, detail) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { error: detail };\n    node.send(msg);\n}\n\n(async () => {\n    const did = env.get('DSP_CONNECTOR_DID');\n    if (!did) { fail(msg, 500, 'DSP_CONNECTOR_DID not provisioned'); return; }\n\n    const rawKey = env.get('DSP_CONNECTOR_KEY');\n    if (!rawKey) {\n        node.error('[iam-issuance] DSP_CONNECTOR_KEY not set — cannot serve did.json');\n        fail(msg, 500, 'connector key not provisioned');\n        return;\n    }\n\n    try {\n        const privateJwk = typeof rawKey === 'string' ? JSON.parse(rawKey) : rawKey;\n        const alg = privateJwk.alg || 'ES256';\n        const kid = did + '#key-1';\n\n        const keyLike = await jose.importJWK(privateJwk, alg);\n        const publicJwk = await jose.exportJWK(keyLike);\n        delete publicJwk.d;\n        delete publicJwk.p;\n        delete publicJwk.q;\n        delete publicJwk.dp;\n        delete publicJwk.dq;\n        delete publicJwk.qi;\n        publicJwk.key_ops = ['verify'];\n        publicJwk.alg = alg;\n        publicJwk.kid = kid;\n\n        msg.payload = buildDidDocument(did, publicJwk, kid);\n        msg.headers = { 'Content-Type': 'application/json' };\n        msg.statusCode = 200;\n        node.send(msg);\n    } catch (err) {\n        node.error('[iam-issuance] did.json build failed: ' + err.message, msg);\n        fail(msg, 500, 'internal error building did.json');\n    }\n})();\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose@5.10.0"
+      }
+    ],
+    "x": 440,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-iam-issuance-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-oidc-meta-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-issuance",
+    "name": "GET /.well-known/openid-credential-issuer",
+    "url": "/.well-known/openid-credential-issuer",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "dsp-iam-issuance-oidc-meta-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-oidc-meta-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "build OID4VCI issuer metadata",
+    "func": "// Static OID4VCI issuer metadata — minimal surface (single credential\n// type: this connector's own Participant VC). No dynamic per-holder logic;\n// this is a discovery document only, per the OpenID4VCI\n// \"openid-credential-issuer\" well-known convention.\nconst did = env.get('DSP_CONNECTOR_DID') || '';\n\n// did:web:<domain>[:<path>...] → https://<domain>/<path>... — same mapping\n// convention as dsp-iam-prep's didWebToUrl in facis-dsp-iam-verify.json.\nfunction didWebToOrigin(d) {\n    const parts = (d || '').split(':');\n    if (parts[0] !== 'did' || parts[1] !== 'web') return '';\n    const segments = parts.slice(2).map(decodeURIComponent);\n    const domain = segments[0];\n    const p = segments.slice(1);\n    return p.length === 0 ? 'https://' + domain : 'https://' + domain + '/' + p.join('/');\n}\n\nconst origin = didWebToOrigin(did);\n\nmsg.payload = {\n    credential_issuer: did,\n    credential_endpoint: origin + '/iam/oid4vci/credential',\n    credential_configurations_supported: {\n        ParticipantCredential: {\n            format: 'jwt_vc_json',\n            scope: 'ParticipantCredential',\n            credential_definition: {\n                type: ['VerifiableCredential', 'gx:LegalParticipant']\n            }\n        }\n    }\n};\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 160,
+    "wires": [
+      [
+        "dsp-iam-issuance-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-issuance",
+    "name": "POST /iam/oid4vci/credential",
+    "url": "/iam/oid4vci/credential",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-guard"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-guard",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "Bearer presence guard",
+    "func": "// Minimal Bearer-presence guard. This repo does not have a full\n// Keycloak-JWKS verification pattern anywhere yet (dsp-iam-verify.json\n// verifies VP/VC tokens presented BY callers, not bearer access tokens\n// presented TO this issuance endpoint), so a presence check is the honest,\n// minimal scope here — do not invent a JWKS verification flow that doesn't\n// exist elsewhere in this codebase.\nconst authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || '';\nconst hasBearer = /^Bearer\\s+\\S+/i.test(authHeader.trim());\n\nif (!hasBearer) {\n    msg.statusCode = 401;\n    msg.headers = { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' };\n    msg.payload = {\n        '@type': 'dspace:Error',\n        'dspace:code': 'missing_authorization',\n        'dspace:reason': ['Authorization: Bearer <token> header is required']\n    };\n    return [null, msg];\n}\nreturn [msg, null];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-fn"
+      ],
+      [
+        "dsp-iam-issuance-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "build + sign Participant VC",
+    "func": "// Build + sign this connector's own Participant VC (self-issuance), then\n// hand off to the GXDCH notary/compliance call chain.\n//\n// Ported from Reference FAP \"8-create VCs.json\" node e720bc9a0b83475e\n// (\"Create & sign Participant VC\") — adapted to (a) self-issue about THIS\n// connector's own did:web identity (env.get('DSP_CONNECTOR_DID')) instead of\n// an onboarding company's per-record domain, (b) read the private JWK from\n// env.get('DSP_CONNECTOR_KEY') instead of Mongo-stored recordDetails, (c)\n// sign a jwt_vc_json via jose.SignJWT instead of an LD-Proof —\n// @gaia-x/json-web-signature-2020 is intentionally NOT one of this node's\n// libs, since the OID4VCI metadata this tab serves\n// (dsp-iam-issuance-oidc-meta-fn) advertises format \"jwt_vc_json\", not\n// \"ldp_vc\".\n//\n// Outputs: [0] GXDCH notary configured → dsp-iam-issuance-vc-notary (http\n// request), [1] notary not configured (or a hard failure) → straight to\n// dsp-iam-issuance-vc-push.\nconst did = env.get('DSP_CONNECTOR_DID');\nif (!did) {\n    node.error('[iam-issuance] DSP_CONNECTOR_DID not set');\n    msg.statusCode = 500;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { error: 'connector DID not provisioned' };\n    node.send([null, msg]);\n    return;\n}\n\nconst rawKey = env.get('DSP_CONNECTOR_KEY');\nif (!rawKey) {\n    node.error('[iam-issuance] DSP_CONNECTOR_KEY not set — cannot sign Participant VC');\n    msg.statusCode = 500;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { error: 'connector key not provisioned' };\n    node.send([null, msg]);\n    return;\n}\n\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nconst kid = did + '#key-1';\nconst issuanceDate = new Date().toISOString();\nconst countryCode = body.countryCode || 'DE';\n\nconst vc = {\n    '@context': [\n        'https://www.w3.org/2018/credentials/v1',\n        'https://w3id.org/security/suites/jws-2020/v1'\n    ],\n    type: ['VerifiableCredential'],\n    id: kid,\n    issuer: did,\n    issuanceDate: issuanceDate,\n    credentialSubject: {\n        id: did,\n        type: 'gx:LegalParticipant',\n        'gx:legalName': body.legalName || 'FACIS IoT-AI DSP Connector',\n        'gx:legalAddress': { 'gx:countrySubdivisionCode': countryCode },\n        'gx:headquarterAddress': { 'gx:countrySubdivisionCode': countryCode }\n    }\n};\n\n(async () => {\n    try {\n        // Light structural JSON-LD sanity check before signing/notarizing.\n        // Best-effort only: jsonld.expand() resolves remote @context\n        // documents over the network, which this pod may not be able to\n        // reach — a failure here is logged but never blocks self-issuance\n        // (mirrors this codebase's warn-not-enforce posture, e.g.\n        // DSP_STATUS_LIST_MODE / DSP_VERIFIER_MODE defaults).\n        try {\n            await jsonld.expand(vc);\n        } catch (ldErr) {\n            node.warn('[iam-issuance] VC JSON-LD context did not expand cleanly (non-fatal): ' + ldErr.message);\n        }\n\n        const privateJwk = typeof rawKey === 'string' ? JSON.parse(rawKey) : rawKey;\n        const alg = privateJwk.alg || 'ES256';\n        const key = await jose.importJWK(privateJwk, alg);\n\n        const jti = 'urn:uuid:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);\n        const vcJwt = await new jose.SignJWT({ vc: vc })\n            .setProtectedHeader({ alg: alg, kid: kid, typ: 'vc+jwt' })\n            .setIssuer(did)\n            .setSubject(did)\n            .setJti(jti)\n            .setIssuedAt()\n            .sign(key);\n\n        msg.vcRecord = { did: did, kid: kid, jti: jti, vc: vc, vcJwt: vcJwt, issuedAt: issuanceDate };\n\n        const notaryUrl = env.get('DSP_GXDCH_NOTARY_URL');\n        if (notaryUrl) {\n            msg.url = notaryUrl;\n            msg.headers = { 'Content-Type': 'application/json' };\n            msg.payload = { vc: vcJwt };\n            node.send([msg, null]);\n        } else {\n            msg.vcRecord.gxdch = { notary: 'skipped (DSP_GXDCH_NOTARY_URL not set)', compliance: null };\n            node.send([null, msg]);\n        }\n    } catch (err) {\n        node.error('[iam-issuance] Participant VC sign failed: ' + err.message, msg);\n        msg.statusCode = 500;\n        msg.headers = { 'Content-Type': 'application/json' };\n        msg.payload = { error: 'internal error signing Participant VC' };\n        node.send([null, msg]);\n    }\n})();\nreturn null;\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose@5.10.0"
+      },
+      {
+        "var": "jsonld",
+        "module": "jsonld@9.0.0"
+      }
+    ],
+    "x": 700,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-notary"
+      ],
+      [
+        "dsp-iam-issuance-vc-push"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-notary",
+    "type": "http request",
+    "z": "tab-dsp-iam-issuance",
+    "name": "POST GXDCH Notary",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 960,
+    "y": 220,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-notary-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-notary-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "notary result → call compliance?",
+    "func": "// Capture the GXDCH notary response, then decide whether to also call\n// GXDCH compliance. Ported (loosely) from Reference FAP \"9-create VP.json\"'s\n// compliance hand-off pattern — adapted to a single self-issued VC instead\n// of a 3-VC VP bundle (participant + T&C + LRN), since this connector only\n// self-issues its own Participant VC.\n//\n// Outputs: [0] compliance configured → dsp-iam-issuance-vc-compliance (http\n// request), [1] not configured → straight to dsp-iam-issuance-vc-push.\nmsg.vcRecord.gxdch = msg.vcRecord.gxdch || {};\nmsg.vcRecord.gxdch.notary = { statusCode: msg.statusCode, body: msg.payload };\n\nconst complianceUrl = env.get('DSP_GXDCH_COMPLIANCE_URL');\nif (complianceUrl) {\n    msg.url = complianceUrl;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': 'https://www.w3.org/2018/credentials/v1',\n        type: 'VerifiablePresentation',\n        verifiableCredential: [msg.vcRecord.vcJwt]\n    };\n    return [msg, null];\n}\nmsg.vcRecord.gxdch.compliance = 'skipped (DSP_GXDCH_COMPLIANCE_URL not set)';\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1220,
+    "y": 220,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-compliance"
+      ],
+      [
+        "dsp-iam-issuance-vc-push"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-compliance",
+    "type": "http request",
+    "z": "tab-dsp-iam-issuance",
+    "name": "POST GXDCH Compliance",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1480,
+    "y": 220,
+    "wires": [
+      [
+        "dsp-iam-issuance-vc-push"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-vc-push",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "push to identityHubPending",
+    "func": "// Final stage — reached from three possible upstream branches\n// (notary-skipped, compliance-skipped after notary ran, or compliance\n// actually called), so msg.vcRecord.gxdch.compliance may already be set to a\n// 'skipped (...)' string or may still be undefined (meaning we just came\n// back from the real compliance http-request call and need to capture it).\nif (msg.vcRecord.gxdch.compliance === undefined) {\n    msg.vcRecord.gxdch.compliance = { statusCode: msg.statusCode, body: msg.payload };\n}\n\n// Small in-memory handoff queue — Task 13's hub tab drains this and\n// persists to Mongo; this tab only issues (single-responsibility, matches\n// how dsp-iam-verify.json never itself performs Mongo writes for identities).\nconst pending = global.get('identityHubPending') || [];\npending.push(msg.vcRecord);\nglobal.set('identityHubPending', pending);\n\nmsg.payload = {\n    format: 'jwt_vc_json',\n    credential: msg.vcRecord.vcJwt\n};\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1220,
+    "y": 340,
+    "wires": [
+      [
+        "dsp-iam-issuance-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issuance-response",
+    "type": "http response",
+    "z": "tab-dsp-iam-issuance",
+    "name": "200/401/500",
+    "statusCode": "",
+    "headers": {},
+    "x": 990,
+    "y": 80,
+    "wires": []
+  }
+]
