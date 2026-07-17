@@ -174,8 +174,38 @@ class TestTransferProcess:
         access = get_resp.json()["access"]
         assert "from=" in access["url"]
         assert "to=" in access["url"]
-        assert "sig=" in access["url"]
+        assert "token=" in access["url"]
+        assert "agreementId=agr-test-003" in access["url"]
+        assert "roles=" in access["url"]
         assert "weather-hourly" in access["url"]
+
+    def test_access_url_percent_encodes_agreement_id_with_colon(
+        self, client: TestClient
+    ) -> None:
+        # agreementId containing a colon must be percent-encoded before being
+        # bound into both the canonical HMAC message and the URL query string
+        # — an unencoded colon would be delimiter-ambiguous with the ':'
+        # separators in "GET:{path}:{from}:{to}:{expires}:{agreementId}:{roles}".
+        create_resp = client.post(
+            "/dsp/transfers",
+            json={
+                "agreementId": "agr-test:special",
+                "assetId": "dataset:facis:weather-hourly",
+                "format": "http-pull",
+                "parameters": {
+                    "windowFrom": "2026-04-01T00:00:00Z",
+                    "windowTo": "2026-04-07T00:00:00Z",
+                },
+            },
+        )
+        assert create_resp.status_code == 202
+        transfer_id = create_resp.json()["transferId"]
+
+        get_resp = client.get(f"/dsp/transfers/{transfer_id}")
+        assert get_resp.status_code == 200
+        access = get_resp.json()["access"]
+        assert "agreementId=agr-test%3Aspecial" in access["url"]
+        assert "agreementId=agr-test:special" not in access["url"]
 
     def test_kafka_streaming_transfer(self, client: TestClient) -> None:
         create_resp = client.post(

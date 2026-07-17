@@ -8,6 +8,7 @@ import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from threading import Lock
+from urllib.parse import quote
 from uuid import uuid4
 
 from src.models import (
@@ -155,23 +156,36 @@ class TransferStore:
         raise ValueError(f"Unsupported format: {transfer.format}")
 
     def _provision_http_pull(self, transfer: TransferProcess) -> AccessObject:
-        """Generate HMAC-signed pull URL per SRS §7.2.1."""
+        """Generate HMAC-signed pull URL per SRS §7.2.1.
+
+        agreementId (and roles, always empty in legacy/Python mode — NF-1
+        identity verification is ORCE-only) are percent-encoded and bound
+        into the signed message so a replayed URL can't be pointed at a
+        different agreement, and so an unencoded delimiter inside either
+        field can't make two different (agreementId, roles) pairs collide
+        on the same signed message. Must stay byte-for-byte in lockstep
+        with the JS/ORCE twin (facis-dsp-transfers.json), which uses
+        encodeURIComponent — equivalent to urllib.parse.quote here.
+        """
         path = f"/api/data/{transfer.assetId}"
         from_ts = transfer.parameters.get("windowFrom", "")
         to_ts = transfer.parameters.get("windowTo", "")
         expires_at = (
             datetime.now(UTC) + timedelta(seconds=self._default_ttl_seconds)
         ).isoformat()
+        agreement_id = quote(transfer.agreementId)
+        roles = quote("")
 
         # HMAC-SHA256 over canonical message
-        message = f"GET:{path}:{from_ts}:{to_ts}:{expires_at}"
+        message = f"GET:{path}:{from_ts}:{to_ts}:{expires_at}:{agreement_id}:{roles}"
         token = hmac.new(
             self._hmac_secret, message.encode("utf-8"), hashlib.sha256
         ).hexdigest()
 
         url = (
             f"{self._data_api_base_url.rstrip('/')}{path}"
-            f"?from={from_ts}&to={to_ts}&expiresAt={expires_at}&sig={token}"
+            f"?from={from_ts}&to={to_ts}&expiresAt={expires_at}"
+            f"&agreementId={agreement_id}&roles={roles}&token={token}"
         )
 
         return AccessObject(url=url, token=token, expiresAt=expires_at)
