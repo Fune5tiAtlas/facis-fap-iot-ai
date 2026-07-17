@@ -14,7 +14,8 @@
     "links": [
       "dsp-neg-iam-call",
       "dsp-tx-iam-call",
-      "dsp-tx-list-iam-call"
+      "dsp-tx-list-iam-call",
+      "dsp-cat-iam-call"
     ],
     "x": 150,
     "y": 120,

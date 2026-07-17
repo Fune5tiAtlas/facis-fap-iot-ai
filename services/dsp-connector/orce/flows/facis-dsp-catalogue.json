@@ -113,6 +113,71 @@
     "y": 260,
     "wires": [
       [
+        "dsp-cat-mode-check"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-mode-check",
+    "type": "function",
+    "z": "tab-dsp-catalogue",
+    "name": "catalogue mode gate",
+    "func": "const mode = (env.get('DSP_IAM_CATALOGUE') || 'open').toLowerCase();\nif (mode === 'verified') {\n    return [null, msg];\n}\nreturn [msg, null];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 280,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-cat-query"
+      ],
+      [
+        "dsp-cat-iam-call"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-iam-call",
+    "type": "link call",
+    "z": "tab-dsp-catalogue",
+    "name": "iam.verify",
+    "links": [
+      "dsp-iam-verify-in"
+    ],
+    "timeout": "5",
+    "x": 420,
+    "y": 120,
+    "wires": [
+      [
+        "dsp-cat-iam-branch"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-iam-branch",
+    "type": "switch",
+    "z": "tab-dsp-catalogue",
+    "name": "iamRejected?",
+    "property": "iamRejected",
+    "propertyType": "msg",
+    "rules": [
+      { "t": "true" },
+      { "t": "false" }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 480,
+    "y": 160,
+    "wires": [
+      [
+        "dsp-cat-response"
+      ],
+      [
         "dsp-cat-query"
       ]
     ]
