@@ -60,7 +60,7 @@
     "type": "function",
     "z": "tab-dsp-iam-hub",
     "name": "drain identityHubPending",
-    "func": "// Drains the in-memory handoff queue tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-push pushes VC records onto. Read-then-clear\n// happens synchronously in this same tick (Node-RED function nodes run\n// on a single-threaded event loop, so there is no concurrent-drain race\n// between this node and the next inject tick), but the queue is cleared\n// BEFORE the Mongo insertMany below actually completes.\n//\n// ponytail: if the insertMany downstream fails (Mongo unreachable, etc.),\n// the drained batch is lost rather than requeued — matches the task's\n// own spec (\"setting it back to [] after reading\"). Acceptable for a\n// best-effort persistence queue; add a requeue-on-error path if\n// durability guarantees are ever needed here.\nconst pending = global.get('identityHubPending') || [];\nif (pending.length === 0) {\n    return null;\n}\nglobal.set('identityHubPending', []);\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — insertMany(docs) takes a single\n// array-of-documents argument, so payload is [pending], not pending.\nmsg.payload = [pending];\nreturn msg;\n",
+    "func": "// Drains the in-memory handoff queue tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-push pushes VC records onto. Read-then-clear\n// happens synchronously in this same tick (Node-RED function nodes run\n// on a single-threaded event loop, so there is no concurrent-drain race\n// between this node and the next inject tick), but the queue is cleared\n// BEFORE the Mongo insertMany below actually completes.\n//\n// ponytail: if the insertMany downstream fails (Mongo unreachable, etc.),\n// the drained batch is lost rather than requeued — matches the task's\n// own spec (\"setting it back to [] after reading\"). Acceptable for a\n// best-effort persistence queue; add a requeue-on-error path if\n// durability guarantees are ever needed here.\nconst pending = global.get('identityHubPending') || [];\nif (pending.length === 0) {\n    return null;\n}\nglobal.set('identityHubPending', []);\n\n// dsp-iam-issuance-vc-push (tab-dsp-iam-issuance) hands off records shaped\n// { did, kid, jti, vc, vcJwt, issuedAt, gxdch } — vc is the full nested VC\n// claims object (vc.type is an array, vc.issuer/vc.credentialSubject.id are\n// the DID strings). dsp-iam-hub-query-fn's buildCredentialFilter (Task 11,\n// kept byte-identical to the proven spec) filters on TOP-LEVEL type/issuer/\n// subject/status, none of which exist on the record as-is — so reshape each\n// record into an insertable document that surfaces those 4 fields, derived\n// from the nested vc claims, while keeping the original fields for audit.\n//\n// Also assigns an explicit string _id (the record's own jti — already a\n// unique per-credential identifier) instead of leaving Mongo to generate an\n// ObjectId: node-red-contrib-mongodb4's handleDocId string->ObjectId\n// auto-conversion is documented in its own source as \"DEPRECATED: no\n// longer maintained, do not use in future projects\", so this sidesteps the\n// string-vs-ObjectId _id mismatch entirely instead of depending on it.\nconst docs = pending.map((record) => ({\n    _id: record.jti,\n    type: (record.vc && Array.isArray(record.vc.type) && record.vc.type.length > 0)\n        ? record.vc.type[record.vc.type.length - 1]\n        : 'VerifiableCredential',\n    issuer: (record.vc && record.vc.issuer) || record.did,\n    subject: (record.vc && record.vc.credentialSubject && record.vc.credentialSubject.id) || null,\n    status: 'active',\n    ...record\n}));\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — insertMany(docs) takes a single\n// array-of-documents argument, so payload is [docs], not docs.\nmsg.payload = [docs];\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -152,7 +152,7 @@
     "type": "function",
     "z": "tab-dsp-iam-hub",
     "name": "build {_id} filter",
-    "func": "// A single hardcoded key (\"_id\") — safe since only the id VALUE is\n// client-controlled, never the key name. msg.req.params.id is never\n// spread directly into the filter object.\nmsg.payload = [{ _id: msg.req.params.id }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "func": "// A single hardcoded key (\"_id\") — safe since only the id VALUE is\n// client-controlled, never the key name. msg.req.params.id is never\n// spread directly into the filter object. Documents get an explicit\n// string _id (record.jti) at insert time (dsp-iam-hub-drain-fn), so a\n// plain string match here is correct — no ObjectId conversion needed.\n//\n// _singleItem tags this request so dsp-iam-hub-unwrap-fn (downstream of\n// the shared find node this and the list route both use) knows to unwrap\n// the 0-or-1-element result array into a single object/404, instead of\n// returning it as an array like the list route does.\nmsg._singleItem = true;\nmsg.payload = [{ _id: msg.req.params.id }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -189,7 +189,7 @@
     "type": "function",
     "z": "tab-dsp-iam-hub",
     "name": "build participant filter",
-    "func": "// Fixed filter — this doubles as the DCP Credential-Service pull\n// endpoint counterparties call to fetch this connector's own\n// self-issued Participant VC (see tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-fn, which self-issues about env.get('DSP_CONNECTOR_DID')).\nmsg.payload = [{ type: 'ParticipantCredential', subject: env.get('DSP_CONNECTOR_DID') }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "func": "// Fixed filter — this doubles as the DCP Credential-Service pull\n// endpoint counterparties call to fetch this connector's own\n// self-issued Participant VC (see tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-fn, which self-issues about env.get('DSP_CONNECTOR_DID')).\n// 'ParticipantCredential' matches vc.type's last array entry as reshaped\n// by dsp-iam-hub-drain-fn — dsp-iam-issuance-vc-fn now signs that as the\n// VC's second @type entry (['VerifiableCredential', 'ParticipantCredential']).\n//\n// _singleItem tags this request so dsp-iam-hub-unwrap-fn (downstream of\n// the shared find node this and the list route both use) knows to unwrap\n// the 0-or-1-element result array into a single object/404, instead of\n// returning it as an array like the list route does.\nmsg._singleItem = true;\nmsg.payload = [{ type: 'ParticipantCredential', subject: env.get('DSP_CONNECTOR_DID') }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -218,6 +218,26 @@
     "handleDocId": false,
     "x": 700,
     "y": 260,
+    "wires": [
+      [
+        "dsp-iam-hub-unwrap-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-unwrap-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "unwrap single-item result",
+    "func": "// Shared by all three read routes via dsp-iam-hub-mongo-find. Only the\n// single-item routes (:id and /participant) set msg._singleItem before\n// reaching the shared find node — the list route (dsp-iam-hub-query-fn)\n// never does, so its full result array passes through here unchanged.\nif (!msg._singleItem) {\n    return msg;\n}\ndelete msg._singleItem;\n\nconst results = Array.isArray(msg.payload) ? msg.payload : [];\nif (results.length === 0) {\n    msg.statusCode = 404;\n    msg.payload = { error: 'not found' };\n} else {\n    msg.payload = results[0];\n    msg.statusCode = 200;\n}\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 820,
+    "y": 320,
     "wires": [
       [
         "dsp-iam-hub-response"
