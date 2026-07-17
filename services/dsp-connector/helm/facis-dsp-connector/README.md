@@ -24,6 +24,11 @@ What this chart renders in `orce` mode:
   via `envFrom`.
 - `PersistentVolumeClaim/facis-dsp-state` — backs `/data/dsp-state/` on the
   ORCE pod for `transfers.json` + `negotiations.json`.
+- `StatefulSet/<fullname>-mongo` + `Service/<fullname>-mongo` — self-contained
+  MongoDB instance backing the Identity Hub (`credentials` collection of
+  issued/self-issued VCs, see `facis-dsp-iam-hub.json`). Unlike the
+  prerequisites below, this is entirely within this chart — no cross-chart
+  wiring needed. Disable with `dsp.iam.mongo.enabled=false`.
 - `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Merges all
   flow JSON files via `jq -s 'add'` and POSTs to the ORCE Admin API at
   `${orceAdminUrl}/flows` with `Authorization: Bearer ${TOKEN}` and
@@ -64,7 +69,33 @@ The ORCE Helm chart (separate repo) must be configured to:
        readOnly: true
    ```
 
-3. Stay at `replicas: 1`. The state files are NOT multi-replica safe.
+3. Reference the pre-created private-key Secret as `DSP_CONNECTOR_KEY` — this
+   connector's own signing key for did:web + Participant VC self-issuance
+   (see `services/dsp-connector/orce/flows/facis-dsp-iam-issuance.json`).
+   The Secret's data key is `privateJwk`, not `DSP_CONNECTOR_KEY`, so this
+   needs a single renamed env var rather than a bulk `extraEnvFrom` — the
+   same shape this chart's own `orce-flow-deploy-job.yaml` already uses to
+   rename its `token` key to `ORCE_ADMIN_TOKEN`:
+   ```yaml
+   # In the ORCE chart values
+   extraEnv:
+     - name: DSP_CONNECTOR_KEY
+       valueFrom:
+         secretKeyRef:
+           name: facis-dsp-connector-identity-key   # matches dsp.iam.keySecret
+           key: privateJwk
+   ```
+
+   Like `facis-orce-admin` (see "ORCE Admin API token" below), this Secret
+   is deliberately **not** rendered by this chart — pre-create it before
+   `helm install`:
+   ```sh
+   kubectl create secret generic facis-dsp-connector-identity-key \
+     --namespace facis \
+     --from-literal=privateJwk='{"kty":"EC","crv":"P-256","d":"...","x":"...","y":"...","alg":"ES256"}'
+   ```
+
+4. Stay at `replicas: 1`. The state files are NOT multi-replica safe.
 
 ## Deploy order
 

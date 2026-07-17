@@ -89,6 +89,22 @@ docker run \
 | `POST` | `/dsp/transfers/{id}/suspend` | Suspend a transfer |
 | `POST` | `/dsp/transfers/{id}/terminate` | Terminate a transfer |
 
+### Identity & Trust — Issuance / Identity Hub (NF-1 follow-on, ORCE mode only)
+
+This connector's own did:web identity, Participant VC self-issuance, a minimal
+OID4VCI issuer surface, and a MongoDB-backed read API over issued credentials
+(`services/dsp-connector/orce/flows/facis-dsp-iam-issuance.json` and
+`facis-dsp-iam-hub.json`).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/.well-known/did.json` | Serves this connector's own did:web document (verification method built from `DSP_CONNECTOR_KEY`'s public JWK) |
+| `GET` | `/.well-known/openid-credential-issuer` | Static OID4VCI issuer metadata (single credential type: `ParticipantCredential`, format `jwt_vc_json`) |
+| `POST` | `/iam/oid4vci/credential` | Issues a fresh self-signed Participant VC (`jwt_vc_json`), Bearer-guarded; pushes the record onto the Identity Hub for persistence |
+| `GET` | `/iam/hub/credentials` | Lists persisted credentials, filterable by `?type`/`?issuer`/`?subject`/`?status` |
+| `GET` | `/iam/hub/credentials/:id` | Fetches a single persisted credential by its `_id` (the credential's `jti`) |
+| `GET` | `/iam/hub/participant` | Returns this connector's own `ParticipantCredential` — the DCP Credential-Service pull endpoint counterparties use to fetch it |
+
 ### Infrastructure
 
 | Method | Path | Description |
