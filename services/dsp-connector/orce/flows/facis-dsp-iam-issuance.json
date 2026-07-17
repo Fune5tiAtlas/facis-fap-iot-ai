@@ -106,14 +106,19 @@
     "id": "dsp-iam-issuance-vc-guard",
     "type": "function",
     "z": "tab-dsp-iam-issuance",
-    "name": "Bearer presence guard",
-    "func": "// Minimal Bearer-presence guard. This repo does not have a full\n// Keycloak-JWKS verification pattern anywhere yet (dsp-iam-verify.json\n// verifies VP/VC tokens presented BY callers, not bearer access tokens\n// presented TO this issuance endpoint), so a presence check is the honest,\n// minimal scope here — do not invent a JWKS verification flow that doesn't\n// exist elsewhere in this codebase.\nconst authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || '';\nconst hasBearer = /^Bearer\\s+\\S+/i.test(authHeader.trim());\n\nif (!hasBearer) {\n    msg.statusCode = 401;\n    msg.headers = { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' };\n    msg.payload = {\n        '@type': 'dspace:Error',\n        'dspace:code': 'missing_authorization',\n        'dspace:reason': ['Authorization: Bearer <token> header is required']\n    };\n    return [null, msg];\n}\nreturn [msg, null];\n",
+    "name": "Bearer shared-secret guard",
+    "func": "// Bearer shared-secret guard. This repo does not have a full\n// Keycloak-JWKS verification pattern anywhere yet (dsp-iam-verify.json\n// verifies VP/VC tokens presented BY callers, not bearer access tokens\n// presented TO this issuance endpoint), so inventing a JWKS flow here\n// would not be honest, minimal scope. Instead: if\n// DSP_OID4VCI_SHARED_SECRET is provisioned, the bearer token must match it\n// exactly (constant-time compare); if it isn't provisioned, fall back to\n// the original presence-only check and node.warn about running\n// unauthenticated — same warn-on-degraded-security posture as\n// dsp-iam-verify.json's 'warn-mode' rejections.\nconst authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || '';\nconst m = /^Bearer\\s+(\\S+)/i.exec(authHeader.trim());\nconst token = m ? m[1] : null;\n\nfunction reject(code, detail) {\n    msg.statusCode = 401;\n    msg.headers = { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' };\n    msg.payload = {\n        '@type': 'dspace:Error',\n        'dspace:code': code,\n        'dspace:reason': [detail]\n    };\n    return [null, msg];\n}\n\nconst sharedSecret = env.get('DSP_OID4VCI_SHARED_SECRET') || '';\n\nif (!token) {\n    return reject('missing_authorization', 'Authorization: Bearer <token> header is required');\n}\n\nif (!sharedSecret) {\n    node.warn('[iam-issuance] DSP_OID4VCI_SHARED_SECRET not set — accepting any Bearer token (unauthenticated)');\n    return [msg, null];\n}\n\n// Length check first: length is not secret, and feeding timingSafeEqual\n// mismatched-length buffers throws rather than comparing.\nconst provided = Buffer.from(token, 'utf8');\nconst expected = Buffer.from(sharedSecret, 'utf8');\nconst matches = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);\n\nif (!matches) {\n    return reject('invalid_authorization', 'Bearer token does not match configured shared secret');\n}\nreturn [msg, null];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
     "x": 430,
     "y": 260,
     "wires": [
