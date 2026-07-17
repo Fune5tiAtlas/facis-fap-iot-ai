@@ -29,14 +29,17 @@ function provisionHttpPull(transfer, opts) {
     const fromTs = (transfer.parameters && transfer.parameters.windowFrom) || '';
     const toTs = (transfer.parameters && transfer.parameters.windowTo) || '';
     const expiresAt = isoUtcWithOffset(new Date(now.getTime() + ttl * 1000));
-    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt;
+    const agreementId = transfer.agreementId || '';
+    const rolesStr = (opts.roles && opts.roles.length) ? [...opts.roles].sort().join(',') : '';
+    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + agreementId + ':' + rolesStr;
     const token = crypto.createHmac('sha256', Buffer.from(secret, 'utf8'))
                         .update(message, 'utf8').digest('hex');
-    return {
-        url: baseUrl + path + '?from=' + fromTs + '&to=' + toTs + '&expiresAt=' + expiresAt + '&sig=' + token,
-        token: token,
-        expiresAt: expiresAt,
-    };
+    const url = baseUrl + path +
+        '?from=' + fromTs + '&to=' + toTs + '&expiresAt=' + expiresAt +
+        '&agreementId=' + encodeURIComponent(agreementId) +
+        '&roles=' + encodeURIComponent(rolesStr) +
+        '&token=' + token;
+    return { url, token, expiresAt };
 }
 
 // ── Python reference: hmac.new(secret, msg, sha256).hexdigest() with
@@ -67,36 +70,40 @@ test('HMAC hex digest is lowercase (matches Python hexdigest())', () => {
     assert.match(out.token, /^[0-9a-f]{64}$/);
 });
 
-test('URL has the exact query-string ordering: from, to, expiresAt, sig', () => {
+test('URL has the exact query-string ordering: from, to, expiresAt, agreementId, roles, token', () => {
     const transfer = {
         assetId: 'dataset:facis:weather-hourly',
+        agreementId: 'agr-weather-1',
         parameters: { windowFrom: '2026-04-01T00:00:00Z', windowTo: '2026-04-07T00:00:00Z' }
     };
     const out = provisionHttpPull(transfer, {
         secret: 'b'.repeat(64),
-        now: new Date(Date.parse('2026-04-01T00:00:00Z'))
+        now: new Date(Date.parse('2026-04-01T00:00:00Z')),
+        roles: ['consumer']
     });
     const u = new URL(out.url);
     assert.equal(u.pathname, '/api/data/dataset:facis:weather-hourly');
     const qs = u.search.replace(/^\?/, '').split('&').map(p => p.split('=')[0]);
-    assert.deepEqual(qs, ['from', 'to', 'expiresAt', 'sig']);
+    assert.deepEqual(qs, ['from', 'to', 'expiresAt', 'agreementId', 'roles', 'token']);
 });
 
-test('canonical message format: GET:{path}:{from}:{to}:{expires}', () => {
+test('canonical message format: GET:{path}:{from}:{to}:{expires}:{agreementId}:{roles}', () => {
     // Reconstruct the canonical message manually to guard against drift.
     const secret = 'c'.repeat(64);
     const fromTs = '2026-04-07T00:00:00Z';
     const toTs = '2026-04-07T23:59:59Z';
     const path = '/api/data/dataset:facis:net-grid-hourly';
+    const agreementId = 'agr-grid-1';
+    const rolesStr = 'analyst,consumer';
     const fixed = new Date(Date.parse('2026-04-07T00:00:00Z'));
     const expiresAt = isoUtcWithOffset(new Date(fixed.getTime() + 3600 * 1000));
-    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt;
+    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + agreementId + ':' + rolesStr;
     const expected = crypto.createHmac('sha256', Buffer.from(secret, 'utf8'))
                            .update(message, 'utf8').digest('hex');
 
     const out = provisionHttpPull(
-        { assetId: 'dataset:facis:net-grid-hourly', parameters: { windowFrom: fromTs, windowTo: toTs } },
-        { secret, now: fixed, ttl: 3600 }
+        { assetId: 'dataset:facis:net-grid-hourly', agreementId, parameters: { windowFrom: fromTs, windowTo: toTs } },
+        { secret, now: fixed, ttl: 3600, roles: ['consumer', 'analyst'] }
     );
     assert.equal(out.token, expected);
 });
@@ -113,6 +120,18 @@ test('empty window params produce literal empty strings between colons', () => {
               'expected from=&to=&expiresAt= ; got: ' + out.url);
 });
 
+test('empty agreementId and roles produce literal empty strings, not omitted', () => {
+    const transfer = {
+        assetId: 'dataset:facis:anomaly-candidates',
+        parameters: {}    // no agreementId, no roles
+    };
+    const fixed = new Date(Date.parse('2026-04-07T00:00:00Z'));
+    const out = provisionHttpPull(transfer, { secret: 'd'.repeat(64), now: fixed });
+    // URL must still include `agreementId=` and `roles=` (empty values) — DO NOT omit
+    assert.ok(out.url.includes('agreementId=&roles=&token='),
+              'expected agreementId=&roles=&token= ; got: ' + out.url);
+});
+
 test('missing DSP_HMAC_SECRET throws', () => {
     assert.throws(() => provisionHttpPull(
         { assetId: 'x', parameters: {} },
@@ -127,4 +146,33 @@ test('trailing slash on base URL is stripped', () => {
     );
     assert.ok(out.url.startsWith('https://example.com/api/data/x?'),
               'expected single slash; got: ' + out.url);
+});
+
+test('agreementId and roles are bound into the canonical message and reject on tamper', () => {
+    const transfer = { assetId: 'dataset:x', agreementId: 'agr-abc123', parameters: {} };
+    const opts = { secret: 'test-secret', baseUrl: 'https://data.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: ['consumer', 'analyst'] };
+    const result = provisionHttpPull(transfer, opts);
+    assert.match(result.url, /agreementId=agr-abc123/);
+    assert.match(result.url, /roles=analyst%2Cconsumer/); // sorted: analyst before consumer
+    // Tamper: swap agreementId in the URL without re-signing — a verifier recomputing
+    // the HMAC over the ORIGINAL agreementId would reject the tampered token, proving
+    // the field is actually part of the signed message, not just decorative.
+    const tamperedMessage = 'GET:/api/data/dataset:x::' + result.expiresAt + ':agr-DIFFERENT:analyst,consumer';
+    const tamperedToken = crypto.createHmac('sha256', Buffer.from('test-secret', 'utf8'))
+        .update(tamperedMessage, 'utf8').digest('hex');
+    assert.notEqual(tamperedToken, result.token);
+});
+
+test('roles are sorted for deterministic signing regardless of input order', () => {
+    const transfer = { assetId: 'dataset:x', agreementId: 'agr-1', parameters: {} };
+    const base = { secret: 's', baseUrl: 'https://d.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z') };
+    const a = provisionHttpPull(transfer, { ...base, roles: ['zebra', 'alpha'] });
+    const b = provisionHttpPull(transfer, { ...base, roles: ['alpha', 'zebra'] });
+    assert.equal(a.token, b.token);
+});
+
+test('missing roles produces empty string, not omitted field', () => {
+    const transfer = { assetId: 'dataset:x', agreementId: 'agr-1', parameters: {} };
+    const result = provisionHttpPull(transfer, { secret: 's', baseUrl: 'https://d.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: [] });
+    assert.match(result.url, /roles=(&|$)/);
 });
