@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 
 from src.security.hmac_middleware import HmacTokenValidator
 from src.security.hmac_signing import HmacSigner, SignedUrlResponse
+from src.security.policy import AccessContext, PolicyDeniedError, PolicyEnforcer
 
 logger = logging.getLogger(__name__)
 
 dsp_router = APIRouter(prefix="/api/v1/dsp", tags=["DSP HTTP Pull Profile"])
+
+# Mounted at the literal path dsp-connector signs for: {baseUrl}/api/data/{assetId}
+# (see provisionHttpPull / _provision_http_pull) — NOT nested under /api/v1/dsp.
+data_router = APIRouter(prefix="/api/data", tags=["DSP HTTP Pull Profile"])
 
 # ---------------------------------------------------------------------------
 # Module-level signer (initialized via configure_dsp_router)
@@ -135,8 +140,13 @@ def _get_validator() -> HmacTokenValidator:
     return _validator
 
 
-async def _verify_pull(
+def _parse_roles(roles: str) -> tuple[str, ...]:
+    return tuple(role.strip() for role in roles.split(",") if role.strip())
+
+
+async def _authorize_asset_pull(
     request: Request,
+    asset_id: str,
     token: str = Query(..., description="HMAC-SHA256 token"),
     expires_at: str = Query(
         ...,
@@ -145,32 +155,67 @@ async def _verify_pull(
     ),
     from_ts: str = Query(..., alias="from", description="Data window start (ISO 8601)"),
     to_ts: str = Query(..., alias="to", description="Data window end (ISO 8601)"),
+    agreement_id: str = Query(
+        "", alias="agreementId", description="Agreement ID bound into the signature"
+    ),
+    roles: str = Query(
+        "", description="Comma-separated roles bound into the signature"
+    ),
     validator: HmacTokenValidator = Depends(_get_validator),
-) -> dict[str, str]:
-    """Validate pull query params via the configured HMAC validator."""
-    return await validator(
+) -> dict[str, Any]:
+    """Verify the HMAC token for this asset, then enforce agreement/asset/role policy.
+
+    Mirrors create_pull_url's load_config()/PolicyEnforcer admission-check idiom.
+    """
+    verified = await validator(
         request,
         token=token,
         expires_at=expires_at,
         from_ts=from_ts,
         to_ts=to_ts,
+        agreement_id=agreement_id,
+        roles=roles,
     )
 
+    from src.config import load_config
 
-@dsp_router.get(
-    "/pull",
-    summary="Validate HMAC token and return data access confirmation",
+    config = load_config()
+    enforcer = PolicyEnforcer(config.policy)
+    ctx = AccessContext(
+        agreement_id=verified.get("agreementId", ""),
+        asset_id=asset_id,
+        roles=_parse_roles(verified.get("roles", "")),
+    )
+    try:
+        enforcer.enforce(ctx)
+    except PolicyDeniedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        ) from e
+
+    return {**verified, "asset_id": asset_id}
+
+
+@data_router.get(
+    "/{asset_id}",
+    summary="Verify HMAC-signed pull token and enforce policy for a data asset",
 )
-async def pull(verified: dict[str, str] = Depends(_verify_pull)) -> dict[str, Any]:
+async def get_asset_data(
+    verified: dict[str, Any] = Depends(_authorize_asset_pull),
+) -> dict[str, Any]:
     """
-    Validate an HMAC-signed pull URL.
+    Validate an HMAC-signed pull URL for a specific asset and enforce
+    agreement/asset/role policy on the bound claims.
 
-    This endpoint verifies the token and, if valid, confirms the
-    data access parameters. In production, this would delegate to
-    the appropriate insight endpoint for actual data retrieval.
+    This endpoint verifies the token and policy, then confirms the data
+    access parameters. It does not perform actual data retrieval — that
+    is out of scope (matching the honest scope of the stub this replaces).
     """
     return {
         "status": "authorized",
+        "asset_id": verified["asset_id"],
+        "agreement_id": verified.get("agreementId"),
         "data_window": {
             "from": verified.get("from"),
             "to": verified.get("to"),

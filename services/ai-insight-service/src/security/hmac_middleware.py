@@ -14,7 +14,7 @@ class HmacTokenValidator:
     Usage in route:
         validator = HmacTokenValidator(signer)
 
-        @router.get("/api/v1/dsp/pull")
+        @router.get("/api/data/{asset_id}")
         async def pull(request: Request, ctx: AccessContext = Depends(validator)):
             ...
     """
@@ -36,10 +36,21 @@ class HmacTokenValidator:
             ..., alias="from", description="Data window start (ISO 8601)"
         ),
         to_ts: str = Query(..., alias="to", description="Data window end (ISO 8601)"),
+        agreement_id: str = Query(
+            "", alias="agreementId", description="Agreement ID bound into the signature"
+        ),
+        roles: str = Query(
+            "", description="Comma-separated roles bound into the signature"
+        ),
     ) -> dict[str, str]:
         """Validate the HMAC token and return the verified parameters."""
         if not self._enabled:
-            return {"from": from_ts, "to": to_ts}
+            return {
+                "from": from_ts,
+                "to": to_ts,
+                "agreementId": agreement_id,
+                "roles": roles,
+            }
 
         path = request.url.path
         method = request.method
@@ -51,10 +62,18 @@ class HmacTokenValidator:
             to_ts=to_ts,
             expires_at=expires_at,
             token=token,
+            agreement_id=agreement_id,
+            roles=roles,
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid or expired HMAC token",
             )
 
-        return {"from": from_ts, "to": to_ts, "expiresAt": expires_at}
+        return {
+            "from": from_ts,
+            "to": to_ts,
+            "expiresAt": expires_at,
+            "agreementId": agreement_id,
+            "roles": roles,
+        }

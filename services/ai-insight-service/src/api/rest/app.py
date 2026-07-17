@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 from fastapi import FastAPI
 
-from src.api.rest.routes.dsp import configure_dsp_router, dsp_router
+from src.api.rest.routes.dsp import configure_dsp_router, data_router, dsp_router
 from src.api.rest.routes.insights import insights_router, outputs_router
 from src.observability.metrics import create_metrics_app
 
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(insights_router)
     app.include_router(outputs_router)
     app.include_router(dsp_router)
+    app.include_router(data_router)
 
     # Initialize DSP HMAC signing (uses HMAC_SECRET env var or generates ephemeral key)
     import os
