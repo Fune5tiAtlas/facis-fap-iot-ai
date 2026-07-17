@@ -31,13 +31,18 @@ function provisionHttpPull(transfer, opts) {
     const expiresAt = isoUtcWithOffset(new Date(now.getTime() + ttl * 1000));
     const agreementId = transfer.agreementId || '';
     const rolesStr = (opts.roles && opts.roles.length) ? [...opts.roles].sort().join(',') : '';
-    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + agreementId + ':' + rolesStr;
+    // Percent-encode before concatenating into the canonical message (not just the URL):
+    // encodeURIComponent never emits a raw ':', so the colon-delimited format stays
+    // unambiguous no matter what characters agreementId/roles contain.
+    const encodedAgreementId = encodeURIComponent(agreementId);
+    const encodedRoles = encodeURIComponent(rolesStr);
+    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + encodedAgreementId + ':' + encodedRoles;
     const token = crypto.createHmac('sha256', Buffer.from(secret, 'utf8'))
                         .update(message, 'utf8').digest('hex');
     const url = baseUrl + path +
         '?from=' + fromTs + '&to=' + toTs + '&expiresAt=' + expiresAt +
-        '&agreementId=' + encodeURIComponent(agreementId) +
-        '&roles=' + encodeURIComponent(rolesStr) +
+        '&agreementId=' + encodedAgreementId +
+        '&roles=' + encodedRoles +
         '&token=' + token;
     return { url, token, expiresAt };
 }
@@ -97,7 +102,9 @@ test('canonical message format: GET:{path}:{from}:{to}:{expires}:{agreementId}:{
     const rolesStr = 'analyst,consumer';
     const fixed = new Date(Date.parse('2026-04-07T00:00:00Z'));
     const expiresAt = isoUtcWithOffset(new Date(fixed.getTime() + 3600 * 1000));
-    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + agreementId + ':' + rolesStr;
+    // agreementId/rolesStr are percent-encoded before concatenation (rolesStr contains a
+    // comma, which encodeURIComponent escapes to %2C — so this must mirror that exactly).
+    const message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + encodeURIComponent(agreementId) + ':' + encodeURIComponent(rolesStr);
     const expected = crypto.createHmac('sha256', Buffer.from(secret, 'utf8'))
                            .update(message, 'utf8').digest('hex');
 
@@ -183,4 +190,21 @@ test('missing roles produces empty string, not omitted field', () => {
     const transfer = { assetId: 'dataset:x', agreementId: 'agr-1', parameters: {} };
     const result = provisionHttpPull(transfer, { secret: 's', baseUrl: 'https://d.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: [] });
     assert.match(result.url, /roles=(&|$)/);
+});
+
+test('colon inside agreementId is percent-encoded, preventing delimiter ambiguity', () => {
+    // Genuine pre-fix collision (verified by reverting the encode and re-running):
+    // 'agr-x:consumer' + ':' + ''  (agreementId='agr-x:consumer', roles=[])
+    //   === 'agr-x' + ':' + 'consumer:'  (agreementId='agr-x', roles=['consumer:'])
+    // both concatenate to the identical raw string '...:agr-x:consumer:', so before the
+    // fix these two DIFFERENT (agreementId, roles) pairs signed to the SAME token. After
+    // percent-encoding, 'agr-x%3Aconsumer' + ':' + '' vs 'agr-x' + ':' + 'consumer%3A'
+    // are unambiguously different, so the tokens below must differ.
+    const transfer1 = { assetId: 'dataset:x', agreementId: 'agr-x:consumer', parameters: {} };
+    const transfer2 = { assetId: 'dataset:x', agreementId: 'agr-x', parameters: {} };
+    const opts1 = { secret: 's', baseUrl: 'https://d.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: [] };
+    const opts2 = { secret: 's', baseUrl: 'https://d.example', ttl: 3600, now: new Date('2026-01-01T00:00:00.000Z'), roles: ['consumer:'] };
+    const result1 = provisionHttpPull(transfer1, opts1);
+    const result2 = provisionHttpPull(transfer2, opts2);
+    assert.notEqual(result1.token, result2.token);
 });
