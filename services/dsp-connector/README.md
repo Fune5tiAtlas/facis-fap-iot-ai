@@ -117,10 +117,30 @@ On `COMPLETED`, an `AccessObject` is provisioned with either:
 
 Token is computed as:
 ```
-HMAC-SHA256(secret, "GET:/api/data/{assetId}:{from}:{to}:{expiresAt}")
+HMAC-SHA256(secret, "GET:/api/data/{assetId}:{from}:{to}:{expiresAt}:{agreementId}:{roles}")
 ```
 
-The signed URL includes `from`, `to`, `expiresAt`, and `sig` query parameters.
+`agreementId` is the transfer's agreement ID; `roles` is the caller's roles, sorted
+and comma-joined (empty string if none). Both are bound into the canonical message
+so a signed URL can't be replayed against a different agreement or role set, and
+both are percent-encoded before being concatenated into the message -- not just the
+URL -- so an unencoded `:` inside either field can't make two different
+`(agreementId, roles)` pairs collide on the same signed message. The ORCE/JS runtime
+encodes with `encodeURIComponent`; the Python/legacy runtime encodes with
+`urllib.parse.quote(value, safe="!*'()")`, which matches `encodeURIComponent`
+byte-for-byte (`quote`'s default safe set differs otherwise: it leaves `/`
+unescaped and escapes `!*'()`, the opposite of `encodeURIComponent`). Legacy/Python
+mode always signs `roles` as empty -- NF-1 identity verification only exists in the
+ORCE runtime.
+
+The signed URL targets `{baseUrl}/api/data/{assetId}` on **ai-insight-service**
+specifically, and includes `from`, `to`, `expiresAt`, `agreementId`, `roles`, and
+`token` query parameters (the parameter was renamed from `sig` to `token`).
+ai-insight-service verifies the token there and enforces `PolicyEnforcer` using
+these HMAC-verified `agreementId`/`roles` claims -- see
+[ai-insight-service's configuration guide](../ai-insight-service/docs/guides/configuration.md#policy-and-rate-limiting)
+for the policy implications, including a default-config consequence for
+legacy/Python-mode deployments.
 
 ## Testing
 
