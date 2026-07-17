@@ -19,7 +19,72 @@
     "y": 80,
     "wires": [
       [
+        "dsp-tx-iam-call"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-tx-iam-call",
+    "type": "link call",
+    "z": "tab-dsp-transfers",
+    "name": "iam.verify",
+    "links": [
+      "dsp-iam-verify-in"
+    ],
+    "timeout": "5",
+    "x": 290,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-tx-iam-branch"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-tx-iam-branch",
+    "type": "switch",
+    "z": "tab-dsp-transfers",
+    "name": "iamRejected?",
+    "property": "iamRejected",
+    "propertyType": "msg",
+    "rules": [
+      { "t": "true" },
+      { "t": "false" }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 350,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-tx-response"
+      ],
+      [
+        "dsp-tx-agreement-check"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-tx-agreement-check",
+    "type": "function",
+    "z": "tab-dsp-transfers",
+    "name": "bind agreementId → identity",
+    "func": "const body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (msg._iamMode === 'off') {\n    return [msg, null];\n}\nconst negs = global.get('negotiations') || {};\nconst neg = Object.values(negs).find(n => n.agreementId === body.agreementId);\nif (!neg) {\n    msg.statusCode = 403;\n    msg.payload = { '@type': 'dspace:Error', 'dspace:code': 'agreement_not_found', 'dspace:reason': ['agreementId ' + body.agreementId + ' does not correspond to any negotiation'] };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [null, msg];\n}\nif (neg.state !== 'FINALIZED') {\n    msg.statusCode = 403;\n    msg.payload = { '@type': 'dspace:Error', 'dspace:code': 'agreement_not_finalized', 'dspace:reason': ['negotiation ' + neg.id + ' is ' + neg.state + ', not FINALIZED'] };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [null, msg];\n}\nif (msg._iamMode !== 'off' && neg.counterparty !== (msg.identity && msg.identity.did)) {\n    msg.statusCode = 403;\n    msg.payload = { '@type': 'dspace:Error', 'dspace:code': 'agreement_not_held_by_caller', 'dspace:reason': ['agreement ' + body.agreementId + ' is held by a different counterparty'] };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [null, msg];\n}\nreturn [msg, null];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 80,
+    "wires": [
+      [
         "dsp-tx-create"
+      ],
+      [
+        "dsp-tx-response"
       ]
     ]
   },
@@ -110,6 +175,48 @@
     "y": 240,
     "wires": [
       [
+        "dsp-tx-list-iam-call"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-tx-list-iam-call",
+    "type": "link call",
+    "z": "tab-dsp-transfers",
+    "name": "iam.verify",
+    "links": [
+      "dsp-iam-verify-in"
+    ],
+    "timeout": "5",
+    "x": 290,
+    "y": 240,
+    "wires": [
+      [
+        "dsp-tx-list-iam-branch"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-tx-list-iam-branch",
+    "type": "switch",
+    "z": "tab-dsp-transfers",
+    "name": "iamRejected?",
+    "property": "iamRejected",
+    "propertyType": "msg",
+    "rules": [
+      { "t": "true" },
+      { "t": "false" }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 350,
+    "y": 240,
+    "wires": [
+      [
+        "dsp-tx-response"
+      ],
+      [
         "dsp-tx-list"
       ]
     ]
@@ -119,7 +226,7 @@
     "type": "function",
     "z": "tab-dsp-transfers",
     "name": "list all",
-    "func": "const transfers = flow.get('transfers') || {};\nmsg.payload = Object.values(transfers);\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
+    "func": "const transfers = flow.get('transfers') || {};\nconst all = Object.values(transfers);\nlet visible = all;\nif (msg._iamMode === 'enforce' || msg._iamMode === 'warn') {\n    const negs = global.get('negotiations') || {};\n    const myDid = msg.identity && msg.identity.did;\n    visible = all.filter(t => {\n        const neg = Object.values(negs).find(n => n.agreementId === t.agreementId);\n        return myDid && neg && neg.counterparty === myDid;\n    });\n}\nmsg.payload = visible;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
