@@ -117,3 +117,21 @@ spec:
                 name: orce
                 port:
                   number: 1880
+          # DSP identity issuance: this connector's own did:web document,
+          # resolved by any counterparty verifying our Participant VC.
+          - path: /.well-known/did.json
+            pathType: Exact
+            backend:
+              service:
+                name: orce
+                port:
+                  number: 1880
+          # DSP Identity Hub query API + OID4VCI issuer surface (NF-1
+          # follow-on) — see services/dsp-connector/README.md.
+          - path: /iam
+            pathType: Prefix
+            backend:
+              service:
+                name: orce
+                port:
+                  number: 1880
