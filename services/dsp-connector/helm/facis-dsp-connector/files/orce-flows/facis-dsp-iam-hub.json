@@ -1,0 +1,238 @@
+[
+  {
+    "id": "tab-dsp-iam-hub",
+    "type": "tab",
+    "label": "FACIS DSP — IAM Hub",
+    "disabled": false,
+    "info": "NF-1 follow-on: MongoDB-backed Identity Hub. Drains this connector's\nin-memory issuance handoff queue (global.get('identityHubPending'),\npushed to by tab-dsp-iam-issuance's dsp-iam-issuance-vc-push) into a\n`credentials` Mongo collection, and serves it back out via a small read\nAPI, including the DCP Credential-Service pull endpoint counterparties\nuse to fetch this connector's own Participant VC.\n\nGET  /iam/hub/credentials       — list, filtered by ?type/?issuer/?subject/?status\nGET  /iam/hub/credentials/:id   — single credential by _id\nGET  /iam/hub/participant       — this connector's own ParticipantCredential\n                                   (DCP Credential-Service pull endpoint)\n\nUses node-red-contrib-mongodb4@3.4.0 (Task 8's provisioning). That\npackage registers exactly two node types: the `mongodb4-client` config\nnode (connection) and a single `mongodb4` operation node (mode +\ncollection + operation are all set per-node; msg.payload must be an\nARRAY of the driver call's arguments, e.g. `[filter]` for find or\n`[docsArray]` for insertMany) — there is no separate mongodb4-in/-out/\n-find node family, despite that being a common Node-RED contrib\nconvention elsewhere. Verified directly against the published package\ntarball (src/mongodb4.js + mongodb4.html + examples/example-1.json),\nnot guessed.\n\nThe `mongodb4-client` config node has no built-in msg/env-typed field for\nits URI — its `uri` property (Advanced Connection URI tab) is a plain\nstring, populated here with Node-RED's standard `${ENV_VAR}` deploy-time\nenvironment-variable substitution syntax (a core Node-RED feature, not\nspecific to function nodes) pointing at env var DSP_MONGO_URI (Task 8).\n`dbName` is set separately (the driver always calls `client.db(dbName)`\nregardless of any db path segment already present in the URI) to\n`identity_hub`, matching the default DSP_MONGO_URI rendered by\ntemplates/orce-secret.yaml (`mongodb://<release>-mongo:27017/identity_hub`).\n\nAdmin-write gating (Keycloak-JWKS bearer check on the drain/write path)\nis a documented, accepted gap: the drain node only consumes THIS\nconnector's own internal issuance queue (global context, not externally\nreachable), so it is not itself an injectable surface. No JWKS-verification\npattern exists elsewhere in this codebase to honestly reuse (see\ndsp-iam-issuance-vc-guard's own comment on the same gap for the write\nside of tab-dsp-iam-issuance). Flagged here as a fast-follow, not invented.\n\nSee orce/tests/flows/iam-hub-query-filter.spec.js for the mirrored pure\nlogic dsp-iam-hub-query-fn's buildCredentialFilter must stay\nbyte-identical to (NoSQL injection whitelist guard)."
+  },
+  {
+    "id": "dsp-iam-hub-mongo-client",
+    "type": "mongodb4-client",
+    "name": "Identity Hub Mongo",
+    "protocol": "mongodb",
+    "hostname": "",
+    "port": "",
+    "dbName": "identity_hub",
+    "appName": "facis-dsp-iam-hub",
+    "authSource": "",
+    "authMechanism": "DEFAULT",
+    "tls": false,
+    "tlsCAFile": "",
+    "tlsCertificateKeyFile": "",
+    "tlsInsecure": false,
+    "connectTimeoutMS": "30000",
+    "socketTimeoutMS": "0",
+    "minPoolSize": "0",
+    "maxPoolSize": "100",
+    "maxIdleTimeMS": "0",
+    "uri": "${DSP_MONGO_URI}",
+    "advanced": "{}",
+    "uriTabActive": "tab-uri-advanced"
+  },
+  {
+    "id": "dsp-iam-hub-drain",
+    "type": "inject",
+    "z": "tab-dsp-iam-hub",
+    "name": "every 5s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-iam-hub-drain-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-drain-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "drain identityHubPending",
+    "func": "// Drains the in-memory handoff queue tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-push pushes VC records onto. Read-then-clear\n// happens synchronously in this same tick (Node-RED function nodes run\n// on a single-threaded event loop, so there is no concurrent-drain race\n// between this node and the next inject tick), but the queue is cleared\n// BEFORE the Mongo insertMany below actually completes.\n//\n// ponytail: if the insertMany downstream fails (Mongo unreachable, etc.),\n// the drained batch is lost rather than requeued — matches the task's\n// own spec (\"setting it back to [] after reading\"). Acceptable for a\n// best-effort persistence queue; add a requeue-on-error path if\n// durability guarantees are ever needed here.\nconst pending = global.get('identityHubPending') || [];\nif (pending.length === 0) {\n    return null;\n}\nglobal.set('identityHubPending', []);\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — insertMany(docs) takes a single\n// array-of-documents argument, so payload is [pending], not pending.\nmsg.payload = [pending];\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-iam-hub-mongo-write"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-mongo-write",
+    "type": "mongodb4",
+    "z": "tab-dsp-iam-hub",
+    "name": "insertMany credentials",
+    "clientNode": "dsp-iam-hub-mongo-client",
+    "mode": "collection",
+    "collection": "credentials",
+    "operation": "insertMany",
+    "output": "toArray",
+    "maxTimeMS": "0",
+    "handleDocId": false,
+    "x": 680,
+    "y": 80,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-query-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-hub",
+    "name": "GET /iam/hub/credentials",
+    "url": "/iam/hub/credentials",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "dsp-iam-hub-query-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-query-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build filter (whitelist)",
+    "func": "// Byte-identical to buildCredentialFilter in\n// orce/tests/flows/iam-hub-query-filter.spec.js (Task 11) — a NoSQL\n// injection guard. Only these 4 fields are ever allowed through, and\n// only when the value is a plain string (rejects object-valued injection\n// attempts like ?issuer[$ne]=null, and array values like repeated\n// ?type=a&type=b).\nfunction buildCredentialFilter(queryParams) {\n    const ALLOWED = ['type', 'issuer', 'subject', 'status'];\n    const filter = {};\n    for (const key of ALLOWED) {\n        const value = queryParams && queryParams[key];\n        if (typeof value === 'string' && value.length > 0) {\n            filter[key] = value;\n        }\n    }\n    return filter;\n}\n\nconst filter = buildCredentialFilter(msg.req.query);\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — find(filter) takes one argument.\nmsg.payload = [filter];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 200,
+    "wires": [
+      [
+        "dsp-iam-hub-mongo-find"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-by-id-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-hub",
+    "name": "GET /iam/hub/credentials/:id",
+    "url": "/iam/hub/credentials/:id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-hub-by-id-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-by-id-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build {_id} filter",
+    "func": "// A single hardcoded key (\"_id\") — safe since only the id VALUE is\n// client-controlled, never the key name. msg.req.params.id is never\n// spread directly into the filter object.\nmsg.payload = [{ _id: msg.req.params.id }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-hub-mongo-find"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-participant-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-hub",
+    "name": "GET /iam/hub/participant",
+    "url": "/iam/hub/participant",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 320,
+    "wires": [
+      [
+        "dsp-iam-hub-participant-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-participant-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build participant filter",
+    "func": "// Fixed filter — this doubles as the DCP Credential-Service pull\n// endpoint counterparties call to fetch this connector's own\n// self-issued Participant VC (see tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-fn, which self-issues about env.get('DSP_CONNECTOR_DID')).\nmsg.payload = [{ type: 'ParticipantCredential', subject: env.get('DSP_CONNECTOR_DID') }];\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 320,
+    "wires": [
+      [
+        "dsp-iam-hub-mongo-find"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-mongo-find",
+    "type": "mongodb4",
+    "z": "tab-dsp-iam-hub",
+    "name": "find credentials",
+    "clientNode": "dsp-iam-hub-mongo-client",
+    "mode": "collection",
+    "collection": "credentials",
+    "operation": "find",
+    "output": "toArray",
+    "maxTimeMS": "0",
+    "handleDocId": false,
+    "x": 700,
+    "y": 260,
+    "wires": [
+      [
+        "dsp-iam-hub-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-response",
+    "type": "http response",
+    "z": "tab-dsp-iam-hub",
+    "name": "200",
+    "statusCode": "",
+    "headers": {},
+    "x": 940,
+    "y": 260,
+    "wires": []
+  }
+]
