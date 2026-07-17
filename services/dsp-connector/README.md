@@ -54,6 +54,12 @@ docker run \
 | `DSP_DATA_API_BASE_URL` | `https://ai-insight.facis.cloud` | No | Base URL for data access endpoints |
 | `DSP_DEFAULT_TTL_SECONDS` | `3600` | No | Default signed URL validity period |
 | `DSP_KAFKA_BOOTSTRAP` | — | No | Kafka bootstrap servers (for kafka-streaming format) |
+| `DSP_IAM_ENFORCE` | `warn` | No | IAM verification mode: `off` (pre-NF-1 parity), `warn` (log violations), `enforce` (reject) |
+| `DSP_VP_AUDIENCE` | `did:web:fap-iotai.facis.cloud` | No | This connector's did:web identity for VP audience claim validation |
+| `DSP_TRUSTED_ISSUERS` | — | No | Comma-separated allowlist of trusted VC-issuer DIDs |
+| `DSP_IAM_JTI_TTL_SECONDS` | `300` | No | Cache TTL for JWT ID (jti) claim validation |
+| `DSP_IAM_DID_CACHE_TTL_SECONDS` | `300` | No | Cache TTL for resolved DIDs and VC documents |
+| `DSP_IAM_CATALOGUE` | `open` | No | Catalogue access mode: `open` (public), `verified` (gated to trusted issuers) |
 | `HTTP_HOST` | `0.0.0.0` | No | Server bind address |
 | `HTTP_PORT` | `8090` | No | Server port |
 

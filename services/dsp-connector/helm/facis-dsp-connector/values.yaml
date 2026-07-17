@@ -80,6 +80,9 @@ dsp:
     trustedIssuers: ""
     jtiTtlSeconds: 300
     didCacheTtlSeconds: 300
+    # -- open (default) | verified. Catalogues are commonly public; set to
+    #    "verified" only if this deployment's catalogue must be gated too.
+    catalogueMode: "open"
 
 # ---------------------------------------------------------------------------
 # State Persistence (orce mode)
