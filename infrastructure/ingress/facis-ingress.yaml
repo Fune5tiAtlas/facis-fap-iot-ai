@@ -146,3 +146,11 @@ spec:
                 name: orce
                 port:
                   number: 1880
+          # NF-2 provider-side HTTP Pull data endpoint (facis-dsp-data.json).
+          - path: /api/data
+            pathType: Prefix
+            backend:
+              service:
+                name: orce
+                port:
+                  number: 1880

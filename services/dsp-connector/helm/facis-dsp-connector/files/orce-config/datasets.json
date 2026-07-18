@@ -8,7 +8,8 @@
       "format": "iceberg/parquet",
       "temporalResolution": "PT1H",
       "schema": "gold",
-      "table": "net_grid_hourly"
+      "table": "net_grid_hourly",
+      "timeColumn": "hour"
     },
     "offers": [
       {
@@ -30,7 +31,8 @@
       "format": "iceberg/parquet",
       "temporalResolution": "PT1H",
       "schema": "gold",
-      "table": "energy_balance_hourly"
+      "table": "energy_balance_hourly",
+      "timeColumn": "hour"
     },
     "offers": [
       {
@@ -51,7 +53,8 @@
       "assetType": "iot.analytics",
       "format": "iceberg/parquet",
       "schema": "gold",
-      "table": "anomaly_candidates"
+      "table": "anomaly_candidates",
+      "timeColumn": "event_timestamp"
     },
     "offers": [
       {
@@ -73,7 +76,8 @@
       "format": "iceberg/parquet",
       "temporalResolution": "P1D",
       "schema": "gold",
-      "table": "event_impact_daily"
+      "table": "event_impact_daily",
+      "timeColumn": "event_date"
     },
     "offers": [
       {
@@ -95,7 +99,8 @@
       "format": "iceberg/parquet",
       "temporalResolution": "PT1H",
       "schema": "gold",
-      "table": "weather_hourly"
+      "table": "weather_hourly",
+      "timeColumn": "hour"
     },
     "offers": [
       {
@@ -117,7 +122,8 @@
       "format": "iceberg/parquet",
       "temporalResolution": "PT1H",
       "schema": "gold",
-      "table": "streetlight_zone_hourly"
+      "table": "streetlight_zone_hourly",
+      "timeColumn": "hour"
     },
     "offers": [
       {
