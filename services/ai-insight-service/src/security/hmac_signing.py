@@ -54,15 +54,14 @@ class HmacSigner:
         before concatenation — NOT raw — for two reasons: (1) it closes a
         delimiter-ambiguity gap where an unencoded ':' inside either field
         could make two different (agreement_id, roles) pairs collide to the
-        same signed message, and (2) it must byte-for-byte match the two
-        signing sides that produce these tokens: dsp-connector's JS flow
-        (encodeURIComponent) and its Python/legacy twin
-        (urllib.parse.quote(value, safe="!*'()")). quote()'s default safe set
-        differs from encodeURIComponent's (quote leaves '/' unescaped and
-        escapes "!*'()"; encodeURIComponent does the opposite), so this
-        specific safe= value is required to make the two byte-for-byte
-        equivalent for all inputs — this is the same fix applied on the
-        signing side in Tasks 4/5.
+        same signed message, and (2) it must byte-for-byte match the signing
+        side that produces these tokens: dsp-connector's ORCE/JS flow, which
+        encodes with encodeURIComponent. quote()'s default safe set differs
+        from encodeURIComponent's (quote leaves '/' unescaped and escapes
+        "!*'()"; encodeURIComponent does the opposite), so this specific
+        safe= value is required to make the two byte-for-byte equivalent for
+        all inputs — this is the same fix applied on the signing side in
+        Tasks 4/5.
         """
         encoded_agreement_id = quote(agreement_id, safe="!*'()")
         encoded_roles = quote(roles, safe="!*'()")

@@ -1,4 +1,4 @@
-{{- if and (eq (default "orce" .Values.compatibilityMode) "orce") .Values.dsp.iam.mongo.enabled }}
+{{- if .Values.dsp.iam.mongo.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

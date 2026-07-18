@@ -49,14 +49,3 @@ ServiceAccount name
 {{- include "facis-dsp-connector.fullname" . }}
 {{- end }}
 {{- end }}
-
-{{/*
-Image reference
-*/}}
-{{- define "facis-dsp-connector.image" -}}
-{{- if .Values.image.tag }}
-{{- printf "%s:%s" .Values.image.repository .Values.image.tag }}
-{{- else }}
-{{- printf "%s:%s" .Values.image.repository .Chart.AppVersion }}
-{{- end }}
-{{- end }}

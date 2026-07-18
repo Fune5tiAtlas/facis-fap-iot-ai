@@ -105,19 +105,6 @@ Important defaults from `config/default.yaml`:
 > (`AI_INSIGHT_POLICY__AGREEMENT_HEADER`/`ASSET_HEADER`/`ROLE_HEADER`) remain in
 > effect only for `POST /api/v1/dsp/create-pull-url`'s own admission check, which
 > is a separate, unchanged signing path.
->
-> **Accepted consequence for legacy/Python-mode dsp-connector deployments:**
-> dsp-connector's Python/legacy runtime always signs an empty `roles` claim (NF-1
-> identity verification only exists in the ORCE runtime), and
-> `AI_INSIGHT_POLICY__REQUIRED_ROLES` defaults to `["ai_insight_consumer"]`. Under
-> the default policy config, every data pull from a `compatibilityMode: legacy`
-> dsp-connector deployment now gets a 403 at `/api/data/{asset_id}` -- this used to
-> work, because the stub it replaced was HMAC-only with no role check. This was
-> reviewed and accepted: legacy mode is a documented rollback fallback with no real
-> identity verification, so it shouldn't retain real data access now that access
-> control is actually enforced. Operators who need legacy-mode pulls to keep
-> working must explicitly set `AI_INSIGHT_POLICY__REQUIRED_ROLES` to `[]` (empty),
-> or migrate the deployment to ORCE mode instead.
 
 ### Cache and Audit
 

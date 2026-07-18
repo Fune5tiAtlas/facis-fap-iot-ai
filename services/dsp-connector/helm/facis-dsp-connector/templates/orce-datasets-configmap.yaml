@@ -1,4 +1,3 @@
-{{- if eq (default "orce" .Values.compatibilityMode) "orce" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,5 +13,4 @@ data:
 {{ .Files.Get $datasetsPath | indent 4 }}
 {{- else }}
   datasets.json: "[]"
-{{- end }}
 {{- end }}

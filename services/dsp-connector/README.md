@@ -1,17 +1,22 @@
 # DSP Connector Service
 
 Eclipse Dataspace Protocol (DSP) 1.0 connector for the FACIS FAP IoT & AI platform.
-Provides catalogue, negotiation, and transfer process services with HMAC-signed URL provisioning.
+Provides catalogue, negotiation, and transfer process services with HMAC-signed URL
+provisioning, plus NF-1 Identity & Trust (VP verification, did:web issuance, Identity
+Hub). Implemented as ORCE-native Node-RED flows — see `orce/README.md` for the flow
+layout, tests, and deploy mechanics. This file documents the protocol surface.
 
 Implements:
 - **FR-DSP-001**: Catalogue Service (SHOULD)
 - **FR-DSP-002**: Contract Negotiation (out of scope per SRS 3.2 -- minimal stub)
 - **FR-DSP-003**: Transfer Process (MUST)
+- **FR-IAM-001/002**: Identity & Trust — see `orce/flows/facis-dsp-iam-verify.json`,
+  `facis-dsp-iam-issuance.json`, `facis-dsp-iam-hub.json`
 
 ## Architecture
 
 ```
-Consumer ──> [DSP Connector] ──> Signed URL ──> [AI Insight Service]
+Consumer ──> [DSP Connector (ORCE)] ──> Signed URL ──> [AI Insight Service]
                   |
                   v
          Transfer Store (state machine)
@@ -22,31 +27,12 @@ Consumer ──> [DSP Connector] ──> Signed URL ──> [AI Insight Service]
 - **HTTP Pull**: HMAC-SHA256 signed URLs with time-windowed access
 - **Kafka Streaming**: SCRAM-SHA-256 authenticated topic access (stub)
 
-## Quick Start
-
-### Local Development
-
-```bash
-pip install -e ".[dev]"
-
-# REQUIRED: HMAC secret for signed URL generation
-export DSP_HMAC_SECRET=$(openssl rand -hex 32)
-export DSP_DATA_API_BASE_URL=http://localhost:8080
-
-python -m src.main
-```
-
-### Docker
-
-```bash
-docker build -t facis-dsp-connector .
-docker run \
-  -e DSP_HMAC_SECRET=$(openssl rand -hex 32) \
-  -e DSP_DATA_API_BASE_URL=http://ai-insight:8080 \
-  facis-dsp-connector
-```
-
 ## Configuration
+
+Rendered into the ORCE pod's environment by the Helm chart's Secret
+(`helm/facis-dsp-connector/templates/orce-secret.yaml`) — see that chart's
+`values.yaml` for the full list, including the `dsp.iam.*` identity values
+(`DSP_IAM_ENFORCE`, `DSP_VP_AUDIENCE`, `DSP_TRUSTED_ISSUERS`, etc.).
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
@@ -60,8 +46,6 @@ docker run \
 | `DSP_IAM_JTI_TTL_SECONDS` | `300` | No | Cache TTL for JWT ID (jti) claim validation |
 | `DSP_IAM_DID_CACHE_TTL_SECONDS` | `300` | No | Cache TTL for resolved DIDs and VC documents |
 | `DSP_IAM_CATALOGUE` | `open` | No | Catalogue access mode: `open` (public), `verified` (gated to trusted issuers) |
-| `HTTP_HOST` | `0.0.0.0` | No | Server bind address |
-| `HTTP_PORT` | `8090` | No | Server port |
 
 ## API Endpoints
 
@@ -85,16 +69,15 @@ docker run \
 |--------|------|-------------|
 | `POST` | `/dsp/transfers` | Create transfer (provisions access) |
 | `GET` | `/dsp/transfers/{id}` | Get transfer state and access object |
-| `GET` | `/dsp/transfers` | List all transfers |
+| `GET` | `/dsp/transfers` | List the caller's own transfers |
 | `POST` | `/dsp/transfers/{id}/suspend` | Suspend a transfer |
 | `POST` | `/dsp/transfers/{id}/terminate` | Terminate a transfer |
 
-### Identity & Trust — Issuance / Identity Hub (NF-1 follow-on, ORCE mode only)
+### Identity & Trust — Issuance / Identity Hub (NF-1 follow-on)
 
 This connector's own did:web identity, Participant VC self-issuance, a minimal
 OID4VCI issuer surface, and a MongoDB-backed read API over issued credentials
-(`services/dsp-connector/orce/flows/facis-dsp-iam-issuance.json` and
-`facis-dsp-iam-hub.json`).
+(`orce/flows/facis-dsp-iam-issuance.json` and `facis-dsp-iam-hub.json`).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -109,9 +92,8 @@ OID4VCI issuer surface, and a MongoDB-backed read API over issued credentials
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/v1/health` | Health check |
-| `GET` | `/metrics` | Prometheus metrics |
-| `GET` | `/docs` | Swagger UI |
+| `GET` | `/api/v1/dsp/health` | Health check |
+| `GET` | `/dsp/metrics` | Prometheus metrics |
 
 ## Transfer State Machine
 
@@ -137,33 +119,29 @@ HMAC-SHA256(secret, "GET:/api/data/{assetId}:{from}:{to}:{expiresAt}:{agreementI
 ```
 
 `agreementId` is the transfer's agreement ID; `roles` is the caller's roles, sorted
-and comma-joined (empty string if none). Both are bound into the canonical message
-so a signed URL can't be replayed against a different agreement or role set, and
-both are percent-encoded before being concatenated into the message -- not just the
-URL -- so an unencoded `:` inside either field can't make two different
-`(agreementId, roles)` pairs collide on the same signed message. The ORCE/JS runtime
-encodes with `encodeURIComponent`; the Python/legacy runtime encodes with
-`urllib.parse.quote(value, safe="!*'()")`, which matches `encodeURIComponent`
-byte-for-byte (`quote`'s default safe set differs otherwise: it leaves `/`
-unescaped and escapes `!*'()`, the opposite of `encodeURIComponent`). Legacy/Python
-mode always signs `roles` as empty -- NF-1 identity verification only exists in the
-ORCE runtime.
+and comma-joined (empty string if none, e.g. when `DSP_IAM_ENFORCE=off` or identity
+didn't resolve). Both are bound into the canonical message so a signed URL can't be
+replayed against a different agreement or role set, and both are percent-encoded
+before being concatenated into the message -- not just the URL -- so an unencoded `:`
+inside either field can't make two different `(agreementId, roles)` pairs collide on
+the same signed message. Encoded with `encodeURIComponent`.
 
 The signed URL targets `{baseUrl}/api/data/{assetId}` on **ai-insight-service**
 specifically, and includes `from`, `to`, `expiresAt`, `agreementId`, `roles`, and
-`token` query parameters (the parameter was renamed from `sig` to `token`).
-ai-insight-service verifies the token there and enforces `PolicyEnforcer` using
-these HMAC-verified `agreementId`/`roles` claims -- see
+`token` query parameters. ai-insight-service verifies the token there and enforces
+`PolicyEnforcer` using these HMAC-verified `agreementId`/`roles` claims -- see
 [ai-insight-service's configuration guide](../ai-insight-service/docs/guides/configuration.md#policy-and-rate-limiting)
-for the policy implications, including a default-config consequence for
-legacy/Python-mode deployments.
+for the policy implications.
 
 ## Testing
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/
+cd orce/tests
+npm install --include=dev
+node --test flows
 ```
+
+See `orce/README.md` for the full flow layout and deploy mechanics.
 
 ## License
 

@@ -27,13 +27,6 @@ jobs:
       dockerfile: "services/sftp-ingestion-service/Dockerfile"
       harbor_config: "deployment/harbor.config"
 
-  dockerbuild-dsp-connector:
-    uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@main
-    secrets: inherit
-    with:
-      dockerfile: "services/dsp-connector/Dockerfile"
-      harbor_config: "deployment/harbor.config"
-
   helm:
     uses: eclipse-xfsc/dev-ops/.github/workflows/helm.yml@main
     secrets: inherit

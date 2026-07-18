@@ -207,9 +207,8 @@ class TestVerifyToken:
         self, signer: HmacSigner
     ) -> None:
         """_compute_hmac must apply quote(value, safe="!*'()") to agreement_id/roles
-        before concatenating — the exact encoding dsp-connector's JS
-        (encodeURIComponent) and Python (urllib.parse.quote(..., safe="!*'()"))
-        signing sides use. This is not just "some" encoding: it independently
+        before concatenating — the exact encoding dsp-connector's ORCE/JS
+        signing side (encodeURIComponent) uses. This is not just "some" encoding: it independently
         reconstructs the expected message with that specific transform and
         compares digests, so it fails if the implementation used raw values, a
         different safe-set, or any other encoding.

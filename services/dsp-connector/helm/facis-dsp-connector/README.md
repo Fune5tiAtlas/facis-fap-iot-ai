@@ -1,27 +1,21 @@
 # facis-dsp-connector Helm chart
 
 Eclipse Dataspace Protocol connector for the FACIS FAP IoT & AI platform.
-Supports two runtime modes via `compatibilityMode`.
 
-## Modes
-
-### `compatibilityMode: orce` (default)
+## What this chart renders
 
 The DSP control plane is owned by the ORCE pod via Node-RED flows under
-`services/dsp-connector/orce/flows/`. This chart's Python Deployment is
-scaled to `replicas: 0` and only exists as a rollback fallback.
+`services/dsp-connector/orce/flows/`.
 
-What this chart renders in `orce` mode:
-
-- `ConfigMap/<fullname>-orce-flows` — bundles the seven flow JSON files
-  from `files/orce-flows/`. Source of truth: `services/dsp-connector/orce/flows/`.
+- `ConfigMap/<fullname>-orce-flows` — bundles the flow JSON files from
+  `files/orce-flows/`. Source of truth: `services/dsp-connector/orce/flows/`.
   Run `./sync-flows.sh` from this directory before `helm install/upgrade`.
 - `ConfigMap/<fullname>-orce-datasets` — wraps `files/orce-config/datasets.json`
   for the ORCE pod to mount at `/data/dsp-config/datasets.json` (read-only
   catalogue source).
 - `Secret/<fullname>-dsp-secrets` — DSP_HMAC_SECRET, DSP_DATA_API_BASE_URL,
-  DSP_DEFAULT_TTL_SECONDS, DSP_KAFKA_BOOTSTRAP. Consumed by the ORCE pod
-  via `envFrom`.
+  DSP_DEFAULT_TTL_SECONDS, DSP_KAFKA_BOOTSTRAP, plus the NF-1 identity
+  values under `dsp.iam.*`. Consumed by the ORCE pod via `envFrom`.
 - `PersistentVolumeClaim/facis-dsp-state` — backs `/data/dsp-state/` on the
   ORCE pod for `transfers.json` + `negotiations.json`.
 - `StatefulSet/<fullname>-mongo` + `Service/<fullname>-mongo` — self-contained
@@ -29,16 +23,10 @@ What this chart renders in `orce` mode:
   issued/self-issued VCs, see `facis-dsp-iam-hub.json`). Unlike the
   prerequisites below, this is entirely within this chart — no cross-chart
   wiring needed. Disable with `dsp.iam.mongo.enabled=false`.
-- `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Merges all
-  flow JSON files via `jq -s 'add'` and POSTs to the ORCE Admin API at
-  `${orceAdminUrl}/flows` with `Authorization: Bearer ${TOKEN}` and
-  `Node-RED-Deployment-Type: full`.
-
-### `compatibilityMode: legacy`
-
-The Python FastAPI service runs at `replicas: ${replicaCount}`. The ORCE
-ConfigMap, Job, datasets ConfigMap, Secret, and PVC are NOT rendered.
-Service points at the Python pod.
+- `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Fetches the
+  ORCE pod's live flow set, merges this chart's tabs into it by node id
+  (never a full-replace — see the Job script's own comments), and POSTs the
+  merged set back with `Node-RED-Deployment-Type: nodes`.
 
 ## ORCE chart prerequisites (cross-chart, deploy-time)
 
@@ -130,27 +118,17 @@ kubectl create secret generic facis-orce-admin \
   --from-literal=token="<token issued by ORCE Admin API>"
 ```
 
-## Endpoint paths (BREAKING CHANGE in `orce` mode)
+## Endpoint paths
 
-| Concern | Python (legacy) | ORCE | Probe / scrape update |
-|---------|-----------------|------|-----------------------|
-| Health  | `GET /api/v1/health` | `GET /api/v1/dsp/health` | yes |
-| Metrics | `GET /metrics` | `GET /dsp/metrics` | yes |
-| Catalogue | `POST /dsp/catalogue/request` | unchanged | no |
-| Negotiations | `POST/GET /dsp/negotiations...` | unchanged | no |
-| Transfers | `POST/GET /dsp/transfers...` | unchanged | no |
+| Concern | Path |
+|---------|------|
+| Health  | `GET /api/v1/dsp/health` |
+| Metrics | `GET /dsp/metrics` |
+| Catalogue | `POST /dsp/catalogue/request` |
+| Negotiations | `POST/GET /dsp/negotiations...` |
+| Transfers | `POST/GET /dsp/transfers...` |
 
-Reason: the shared ORCE pod already serves `/api/v1/health` and `/metrics`
-for the Simulation flow. Namespacing prevents route collision.
-
-## Rollback
-
-```sh
-helm upgrade --reuse-values --set compatibilityMode=legacy facis-dsp-connector .
-```
-
-This scales the Python Deployment back to `replicaCount`. The ORCE flows
-remain installed on the ORCE pod but only the Python service responds via
-this chart's Service. To remove the ORCE flows as well, set
-`orceFlowDeploy.enabled=false` and delete the deployed flow tabs through
-the ORCE Admin API manually.
+Namespaced under `/dsp` (rather than the bare `/api/v1/health` and
+`/metrics` a standalone service would use) because the shared ORCE pod also
+serves those bare paths for the Simulation flow — namespacing prevents route
+collision.

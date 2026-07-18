@@ -4,23 +4,11 @@
 # All values are documented inline. Override any value with --set or -f.
 
 # ---------------------------------------------------------------------------
-# Runtime Mode
+# ORCE Flow Deployment
 # ---------------------------------------------------------------------------
-# Selects which runtime owns the DSP control plane.
-#
-#   orce   (default) — ORCE-native flows on the existing ORCE pod own the
-#                       runtime. The Python deployment in this chart is
-#                       scaled to 0 and acts as a rollback fallback. Helm
-#                       post-install hook deploys the flow ConfigMap to the
-#                       ORCE Admin API (see orceFlowDeploy below).
-#                       Endpoints exposed by ORCE pod, NOT this chart's Service.
-#   legacy           — Python FastAPI service owns the runtime. ORCE flow
-#                       ConfigMap + Job are NOT rendered.
-compatibilityMode: orce
-
-# ---------------------------------------------------------------------------
-# ORCE Flow Deployment (active when compatibilityMode = "orce")
-# ---------------------------------------------------------------------------
+# ORCE-native flows on the existing ORCE pod own the DSP control plane.
+# Helm post-install hook deploys the flow ConfigMap to the ORCE Admin API.
+# Endpoints are exposed by the ORCE pod, not this chart.
 orceFlowDeploy:
   # -- Whether to render the ConfigMap + post-install Job that deploy flows
   enabled: true
@@ -59,7 +47,7 @@ orceFlowDeploy:
 # (see templates/orce-secret.yaml). The ORCE chart must include
 # `envFrom: [secretRef: <fullname>-dsp-secrets]` in its Deployment.
 dsp:
-  # -- HMAC secret for signed-URL generation (REQUIRED in orce mode).
+  # -- HMAC secret for signed-URL generation (REQUIRED).
   #    Generate with: openssl rand -hex 32
   hmacSecret: ""
   # -- Base URL for the data API (HTTP-pull endpoint of ai-insight-service)
@@ -118,7 +106,7 @@ dsp:
     keySecret: "facis-dsp-connector-identity-key"
 
 # ---------------------------------------------------------------------------
-# State Persistence (orce mode)
+# State Persistence
 # ---------------------------------------------------------------------------
 # The ORCE pod's flows write transfer + negotiation state to a PVC at
 # /data/dsp-state/. The PVC is created by this chart but mounted by the
@@ -131,77 +119,8 @@ dspStatePvc:
   accessModes:
     - ReadWriteOnce
 
-# ---------------------------------------------------------------------------
-# Container Image (legacy mode only — Python runtime)
-# ---------------------------------------------------------------------------
-image:
-  repository: ghcr.io/eclipse-xfsc/facis-fap-iot-ai/dsp-connector
-  tag: ""
-  pullPolicy: IfNotPresent
-
-imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
-
-# -- Number of Python pod replicas. Ignored when compatibilityMode==orce
-#    (Deployment scales to 0 in orce mode).
-replicaCount: 1
-
-# ---------------------------------------------------------------------------
-# HTTP / REST API (legacy mode only)
-# ---------------------------------------------------------------------------
-http:
-  port: 8090
-
-# ---------------------------------------------------------------------------
-# Service (legacy mode only — ORCE pod has its own Service)
-# ---------------------------------------------------------------------------
-service:
-  type: ClusterIP
-  httpPort: 8090
-
-# ---------------------------------------------------------------------------
-# Pod Security
-# ---------------------------------------------------------------------------
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
-
-securityContext:
-  allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
-  capabilities:
-    drop: [ALL]
-
-# ---------------------------------------------------------------------------
-# Resources
-# ---------------------------------------------------------------------------
-resources:
-  requests:
-    cpu: 50m
-    memory: 128Mi
-  limits:
-    cpu: 250m
-    memory: 256Mi
-
-# ---------------------------------------------------------------------------
-# Probes (legacy mode only)
-# ---------------------------------------------------------------------------
-livenessProbe:
-  httpGet:
-    path: /api/v1/health
-    port: http
-  initialDelaySeconds: 10
-  periodSeconds: 30
-
-readinessProbe:
-  httpGet:
-    path: /api/v1/health
-    port: http
-  initialDelaySeconds: 5
-  periodSeconds: 10
 
 # ---------------------------------------------------------------------------
 # ServiceAccount
@@ -211,21 +130,3 @@ serviceAccount:
   name: ""
   annotations: {}
   automountServiceAccountToken: false
-
-# ---------------------------------------------------------------------------
-# Metrics (legacy mode only — ORCE serves /dsp/metrics from its own pod)
-# ---------------------------------------------------------------------------
-metrics:
-  path: /metrics
-  serviceMonitor:
-    enabled: false
-    interval: 30s
-    scrapeTimeout: 10s
-    additionalLabels: {}
-
-# ---------------------------------------------------------------------------
-# Scheduling
-# ---------------------------------------------------------------------------
-nodeSelector: {}
-tolerations: []
-affinity: {}

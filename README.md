@@ -14,7 +14,7 @@ Part of the [FACIS](https://github.com/eclipse-xfsc/facis) project under [IPCEI-
 | AI Insight Service | `services/ai-insight-service/` | FastAPI backend for governed AI insights | v0.1.0 |
 | AI Insight UI | `services/ai-insight-ui/` | Vue.js + UIBUILDER dashboard | v0.1.0 |
 | SFTP Ingestion | `services/sftp-ingestion-service/` | Polls SFTP directories, publishes to Kafka Bronze layer | v1.0.0 |
-| DSP Connector | `services/dsp-connector/` | Eclipse Dataspace Protocol connector (catalogue, transfers) | v1.0.0 |
+| DSP Connector | `services/dsp-connector/` | Eclipse Dataspace Protocol connector (catalogue, transfers, identity) — ORCE-native | v1.0.0 |
 
 ## Quick Start
 
@@ -35,13 +35,11 @@ python -m src.main
 cd services/sftp-ingestion-service
 pip install -e ".[dev]"
 python -m src.main
-
-# DSP Connector
-cd services/dsp-connector
-pip install -e ".[dev]"
-export DSP_HMAC_SECRET=$(openssl rand -hex 32)
-python -m src.main
 ```
+
+DSP Connector is ORCE-native (Node-RED flows) — see
+[services/dsp-connector/orce/README.md](services/dsp-connector/orce/README.md)
+for local flow testing.
 
 ### Kubernetes (Production)
 
