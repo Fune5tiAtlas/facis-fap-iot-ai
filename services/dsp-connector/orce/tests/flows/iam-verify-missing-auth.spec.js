@@ -22,7 +22,7 @@ function dspError(code, detail) {
     return {
         statusCode: 401,
         headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' },
-        payload: { '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': [detail] }
+        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': [detail] }
     };
 }
 
@@ -63,6 +63,7 @@ test('enforce mode: no Authorization header at all → rejects with missing_auth
     assert.equal(msg.statusCode, 401);
     assert.deepEqual(msg.headers, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
     assert.deepEqual(msg.payload, {
+        '@context': 'https://w3id.org/dspace/2025/1/context.jsonld',
         '@type': 'dspace:Error',
         'dspace:code': 'missing_authorization',
         'dspace:reason': ['Authorization: Bearer <vp+jwt> header is required']

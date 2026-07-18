@@ -114,7 +114,7 @@ spec:
                 echo "[init-deps] installing missing packages:$MISSING"
                 for p in $MISSING; do
                   echo "[init-deps] >>> $p"
-                  if npm install --save --no-audit --no-fund --prefix /mnt/orce-data "$p"; then
+                  if npm install --save --save-exact --no-audit --no-fund --prefix /mnt/orce-data "$p"; then
                     echo "[init-deps] OK $p"
                   else
                     echo "[init-deps] FAIL $p (continuing)"
@@ -128,7 +128,7 @@ spec:
               if [ "$NEEDS_REBUILD" = "1" ] && [ -d /mnt/orce-data/node_modules/node-rdkafka ]; then
                 echo "[init-deps] rebuilding node-rdkafka with OpenSSL"
                 rm -rf /mnt/orce-data/node_modules/node-rdkafka /mnt/orce-data/node_modules/node-red-contrib-rdkafka
-                if npm install --save --no-audit --no-fund --prefix /mnt/orce-data \
+                if npm install --save --save-exact --no-audit --no-fund --prefix /mnt/orce-data \
                      node-red-contrib-rdkafka; then
                   echo "[init-deps] OK rebuild"
                 else
