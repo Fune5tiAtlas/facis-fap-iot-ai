@@ -37,7 +37,7 @@
     "libs": [
       {
         "var": "jose",
-        "module": "jose@5.10.0"
+        "module": "jose"
       }
     ],
     "x": 440,
@@ -144,7 +144,7 @@
     "libs": [
       {
         "var": "jose",
-        "module": "jose@5.10.0"
+        "module": "jose"
       },
       {
         "var": "jsonld",
