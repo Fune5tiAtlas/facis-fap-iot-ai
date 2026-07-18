@@ -174,3 +174,23 @@ test('golden: holder mismatch → holder_binding_failed', async () => {
     const r = await verifyPresentation({ ...commonArgs, vpToken: vectors.holderMismatch, jtiCache: new Map() });
     assert.equal(r.ok, false); assert.equal(r.code, 'holder_binding_failed');
 });
+
+test('golden: tampered inner VC signature → invalid_credential', async () => {
+    const r = await verifyPresentation({ ...commonArgs, vpToken: vectors.tamperedVc, jtiCache: new Map() });
+    assert.equal(r.ok, false); assert.equal(r.code, 'invalid_credential');
+});
+
+// Reuses the `valid` vector (a genuinely valid VP) but substitutes a
+// resolver that returns the untrusted issuer's key for the holder DID
+// instead of the holder's real key — did.json resolves successfully, it
+// just carries the wrong key. Distinct from a resolver error (key_mismatch,
+// see iam-verify.spec.js); this fails at signature verification instead.
+test('golden: forged DID (did.json resolves but key does not match signer) → invalid_signature', async () => {
+    const r = await verifyPresentation({
+        ...commonArgs,
+        resolveJwk: async (did) => (did === 'did:web:holder.example' ? keys.untrustedIssuer.publicJwk : keys.issuer.publicJwk),
+        vpToken: vectors.valid,
+        jtiCache: new Map()
+    });
+    assert.equal(r.ok, false); assert.equal(r.code, 'invalid_signature');
+});

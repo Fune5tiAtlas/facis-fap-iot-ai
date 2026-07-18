@@ -273,7 +273,7 @@ test('verifyPresentation: tampered VP signature → invalid_signature', async ()
     assert.equal(result.code, 'invalid_signature');
 });
 
-test('verifyPresentation: forged DID (resolver key does not match signer) → key_mismatch or invalid_signature', async () => {
+test('verifyPresentation: forged DID (did.json unresolvable) → key_mismatch', async () => {
     const holder = await makeKeypair();
     const now = Math.floor(Date.now() / 1000);
     const vp = await makeSignedJwt({
@@ -290,6 +290,78 @@ test('verifyPresentation: forged DID (resolver key does not match signer) → ke
     });
     assert.equal(result.ok, false);
     assert.equal(result.code, 'key_mismatch');
+});
+
+// Distinct from the case above: here did.json resolves successfully (no
+// resolver error) but happens to carry a DIFFERENT, unrelated key than the
+// one that actually signed the VP — e.g. a stale/wrong verificationMethod
+// entry, or an attacker who controls the did:web domain but not the
+// holder's real key. importJWK succeeds (it's a well-formed key), so this
+// fails downstream at signature verification, not key resolution — hence
+// invalid_signature, not key_mismatch. The two forged-DID sub-cases are
+// intentionally distinguished: they surface different operational problems
+// (resolution failure vs. a resolvable-but-wrong trust anchor).
+test('verifyPresentation: forged DID (did.json resolves but key does not match signer) → invalid_signature', async () => {
+    const holder = await makeKeypair();
+    const wrongKeyHolder = await makeKeypair();
+    const now = Math.floor(Date.now() / 1000);
+    const vp = await makeSignedJwt({
+        iss: 'did:web:holder.example', sub: 'did:web:holder.example',
+        aud: 'did:web:connector.example', jti: 'vp-jti-4b', exp: now + 300,
+        vp: { verifiableCredential: [] }
+    }, holder.privateKey, 'did:web:holder.example#key-1', 'ES256');
+
+    const result = await verifyPresentation({
+        vpToken: vp,
+        resolveJwk: async () => wrongKeyHolder.publicJwk,
+        audience: 'did:web:connector.example', trustedIssuers: [],
+        nowMs: now * 1000, jtiCache: new Map(), jtiTtlMs: 300000
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'invalid_signature');
+});
+
+// Outer VP is validly signed by the real holder and passes every VP-level
+// check (audience, expiry, jti) — the tamper is on the INNER credential
+// only, flipping one base64url char in the VC's own signature segment
+// (same technique the file's VP-level tamper test uses, applied one layer
+// deeper). Proves the VC signature is actually verified independently of
+// the VP wrapper, not just decoded/trusted because the outer envelope
+// checked out.
+test('verifyPresentation: tampered inner VC signature → invalid_credential', async () => {
+    const holder = await makeKeypair();
+    const issuer = await makeKeypair();
+    const now = Math.floor(Date.now() / 1000);
+
+    const vc = await makeSignedJwt({
+        iss: 'did:web:issuer.example',
+        vc: { credentialSubject: { id: 'did:web:holder.example', roles: ['participant'] } },
+        iat: now
+    }, issuer.privateKey, 'did:web:issuer.example#key-1', 'ES256');
+    const vcSegs = vc.split('.');
+    const vcSigChars = vcSegs[2].split('');
+    vcSigChars[0] = vcSigChars[0] === 'A' ? 'B' : 'A';
+    const tamperedVc = vcSegs[0] + '.' + vcSegs[1] + '.' + vcSigChars.join('');
+
+    const vp = await makeSignedJwt({
+        iss: 'did:web:holder.example', sub: 'did:web:holder.example',
+        aud: 'did:web:connector.example', jti: 'vp-jti-vc-tamper', exp: now + 300,
+        vp: { verifiableCredential: [tamperedVc] }
+    }, holder.privateKey, 'did:web:holder.example#key-1', 'ES256');
+
+    const resolveJwk = async (did) => (did === 'did:web:holder.example' ? holder.publicJwk : issuer.publicJwk);
+
+    const result = await verifyPresentation({
+        vpToken: vp,
+        resolveJwk,
+        audience: 'did:web:connector.example',
+        trustedIssuers: ['did:web:issuer.example'],
+        nowMs: now * 1000,
+        jtiCache: new Map(),
+        jtiTtlMs: 300000
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'invalid_credential');
 });
 
 test('verifyPresentation: untrusted VC issuer → untrusted_issuer', async () => {

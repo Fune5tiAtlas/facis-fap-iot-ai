@@ -43,6 +43,15 @@ async function main() {
         vc: { credentialSubject: { id: 'did:web:someone-else.example', roles: [] } }
     }, issuer.privateKey, 'did:web:issuer.example#key-1');
 
+    // Tampered-inner-VC vector: same valid VC as `validVc`, but with one
+    // base64url char flipped in its own signature segment, then wrapped in
+    // an otherwise-validly-signed VP. Proves the VC signature is checked
+    // independently of the VP wrapper.
+    const validVcSegs = validVc.split('.');
+    const validVcSigChars = validVcSegs[2].split('');
+    validVcSigChars[0] = validVcSigChars[0] === 'A' ? 'B' : 'A';
+    const tamperedVc = validVcSegs[0] + '.' + validVcSegs[1] + '.' + validVcSigChars.join('');
+
     async function signVp(payload) {
         return sign(payload, holder.privateKey, 'did:web:holder.example#key-1');
     }
@@ -73,6 +82,11 @@ async function main() {
             iss: 'did:web:holder.example', sub: 'did:web:holder.example',
             aud: 'did:web:connector.example', jti: 'golden-mismatch', exp: now + 300,
             vp: { verifiableCredential: [mismatchedVc] }
+        }),
+        tamperedVc: await signVp({
+            iss: 'did:web:holder.example', sub: 'did:web:holder.example',
+            aud: 'did:web:connector.example', jti: 'golden-tampered-vc', exp: now + 300,
+            vp: { verifiableCredential: [tamperedVc] }
         })
     };
     // Tampered-signature vector: flip one base64url char in the valid VP's signature segment.
