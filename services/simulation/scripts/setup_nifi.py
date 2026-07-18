@@ -73,6 +73,7 @@ TOPIC_TABLE_MAP = {
     "sim.smart_city.traffic": "traffic",
     "sim.smart_city.event": "city_event",
     "sim.smart_city.weather": "city_weather",
+    "dsp.ingest.raw": "dsp_ingest",
 }
 
 # ---------------------------------------------------------------------------
@@ -221,6 +222,13 @@ class NiFiClient:
         for pg in flow["processGroupFlow"]["flow"].get("processGroups", []):
             if pg["component"]["name"] == name:
                 return pg
+        return None
+
+    def get_controller_service_id(self, pg_id: str, name: str) -> str | None:
+        services = self.get(f"/flow/process-groups/{pg_id}/controller-services")
+        for svc in services.get("controllerServices", []):
+            if svc["component"]["name"] == name:
+                return svc["id"]
         return None
 
 
@@ -391,6 +399,51 @@ def create_ingestion_flow(
 
     logger.info(f"  Flow: {topic} → bronze.{table}")
     return proc_ids
+
+
+def add_topic(nifi_url: str, token: str, catalog: str, topic: str, dry_run: bool = False) -> None:
+    """Add ONE new topic's ingestion flow to the EXISTING, already-running
+    process group, without touching the other already-running flows or
+    recreating any controller service. The live process group and its 9
+    flows must never be torn down to add a 10th — see this plan's Global
+    Constraints."""
+    if topic not in TOPIC_TABLE_MAP:
+        logger.error(f"Unknown topic {topic!r}; add it to TOPIC_TABLE_MAP first.")
+        sys.exit(1)
+    table = TOPIC_TABLE_MAP[topic]
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would add flow: {topic} → bronze.{table} to existing process group '{PG_NAME}'")
+        return
+
+    client = NiFiClient(nifi_url, token)
+    root_id = client.get_root_pg_id()
+    pg = client.find_process_group(root_id, PG_NAME)
+    if not pg:
+        logger.error(f"Process group '{PG_NAME}' not found — run setup_nifi.py without --add-topic first.")
+        sys.exit(1)
+    pg_id = pg["id"]
+
+    ssl_svc_id = client.get_controller_service_id(pg_id, "Stackable TLS Context")
+    kafka_svc_id = client.get_controller_service_id(pg_id, "FACIS Kafka Connection")
+    if not ssl_svc_id or not kafka_svc_id:
+        logger.error("Could not find the existing controller services in the process group — aborting rather than creating duplicates.")
+        sys.exit(1)
+
+    # y_offset places the new flow below the 9 existing ones on the NiFi
+    # canvas (each existing flow is 200px apart, see setup_nifi()'s loop).
+    proc_ids = create_ingestion_flow(
+        client, pg_id, topic, table, kafka_svc_id, ssl_svc_id, catalog,
+        x_offset=0, y_offset=len(TOPIC_TABLE_MAP) * 200,
+    )
+    started = 0
+    for proc_id in proc_ids:
+        try:
+            client.start_processor(proc_id)
+            started += 1
+        except Exception as e:
+            logger.warning(f"  Could not start processor {proc_id}: {e}")
+    logger.info(f"Added flow: {topic} → bronze.{table} ({started}/{len(proc_ids)} processors started)")
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +642,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--catalog", default=None, help=f"Trino catalog (default: {DEFAULT_CATALOG})")
     parser.add_argument("--dry-run", action="store_true", help="Print config without applying")
     parser.add_argument("--teardown", action="store_true", help="Remove FACIS process group")
+    parser.add_argument("--add-topic", metavar="TOPIC", default=None,
+                         help="Add one new topic's ingestion flow to the EXISTING process group (must be in TOPIC_TABLE_MAP) without touching the other flows.")
     return parser.parse_args()
 
 
@@ -613,6 +668,10 @@ def main() -> None:
     print("=" * 72)
 
     token = get_oidc_token(keycloak_url, username, password, client_secret)
+
+    if args.add_topic:
+        add_topic(nifi_url, token, catalog, args.add_topic, dry_run=args.dry_run)
+        return
 
     if args.teardown:
         teardown_nifi(nifi_url, token)

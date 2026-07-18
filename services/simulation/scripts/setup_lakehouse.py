@@ -66,6 +66,7 @@ TOPIC_TABLE_MAP = {
     "sim.smart_city.traffic": "traffic",
     "sim.smart_city.event": "city_event",
     "sim.smart_city.weather": "city_weather",
+    "dsp.ingest.raw": "dsp_ingest",
 }
 
 # ---------------------------------------------------------------------------
@@ -245,6 +246,25 @@ def create_bronze_tables(conn: trino.dbapi.Connection, catalog: str, s3_bucket: 
         if execute_ddl(conn, sql, f"bronze.{table} (← {topic}) → {location}"):
             ok += 1
     return ok
+
+
+def add_bronze_table(conn: trino.dbapi.Connection, catalog: str, s3_bucket: str, topic: str) -> None:
+    """Create ONE new Bronze table for a topic just added to TOPIC_TABLE_MAP,
+    without touching schemas or any other table. create_schemas()'s
+    DROP SCHEMA IF EXISTS / CREATE SCHEMA pair is only safe against an
+    empty or brand-new cluster — CREATE SCHEMA has no IF NOT EXISTS, so
+    running it against a live, populated schema fails loudly. This is the
+    additive counterpart for adding one table to an already-live lakehouse."""
+    if topic not in TOPIC_TABLE_MAP:
+        logger.error(f"Unknown topic {topic!r}; add it to TOPIC_TABLE_MAP first.")
+        sys.exit(1)
+    table = TOPIC_TABLE_MAP[topic]
+    location = f"s3a://{s3_bucket}/warehouse/bronze.db/{table}"
+    sql = BRONZE_DDL.format(catalog=catalog, table=table, location=location)
+    if execute_ddl(conn, sql, f"bronze.{table} (← {topic}) → {location}"):
+        logger.info(f"Bronze table bronze.{table} ready.")
+    else:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -993,6 +1013,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--catalog", default=None, help=f"Trino catalog (default: {DEFAULT_CATALOG})")
     parser.add_argument("--s3-bucket", default=None, help=f"S3 bucket for Iceberg data (default: {DEFAULT_S3_BUCKET})")
     parser.add_argument("--teardown", action="store_true", help="Drop all tables/views/schemas")
+    parser.add_argument("--add-bronze-table", metavar="TOPIC", default=None,
+                         help="Create one new Bronze table for TOPIC (must be in TOPIC_TABLE_MAP) without touching schemas or other tables.")
     return parser.parse_args()
 
 
@@ -1011,6 +1033,10 @@ def main() -> None:
 
     token = get_oidc_token(keycloak_url, username, password, client_secret)
     conn = connect_trino(trino_host, trino_port, token, catalog)
+
+    if args.add_bronze_table:
+        add_bronze_table(conn, catalog, s3_bucket, args.add_bronze_table)
+        return
 
     if args.teardown:
         teardown(conn, catalog)
