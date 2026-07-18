@@ -160,7 +160,13 @@ async function runNode(flowPath, nodeId, opts) {
     // deliberately catches both — a node that legitimately returns `false`
     // or `0` isn't using this pattern and shouldn't be held up waiting.
     if (result == null && sent.length === 0 && errors.length === 0) {
-        const deadline = Date.now() + 2000;
+        // 5s, not 2s: dsp-iam-issuance-vc-fn's real code path includes a
+        // best-effort jsonld.expand() call that resolves remote JSON-LD
+        // @context documents over the actual network (matching production
+        // — see that node's own comment on why this is non-fatal/logged,
+        // not mocked here). A slow real network hop under this deadline
+        // reads as a flaky test failure, not a bug in the node under test.
+        const deadline = Date.now() + 5000;
         while (sent.length === 0 && errors.length === 0 && Date.now() < deadline) {
             await new Promise((resolve) => setTimeout(resolve, 2));
         }

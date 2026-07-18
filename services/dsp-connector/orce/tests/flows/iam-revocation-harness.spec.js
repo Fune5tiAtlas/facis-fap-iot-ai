@@ -127,6 +127,44 @@ test('verify-status-list: bit not set → identity passes through untouched', as
     assert.deepEqual(out.identity, { did: 'did:web:holder.test', credentialId: 'cred-2', roles: ['participant'] });
 });
 
+test('verify-status-list: caller\'s original request body (_iamOrigPayload) is restored, not left as the fetched status list credential', async () => {
+    // Regression test for a real live bug: an earlier version of this
+    // node restored _iamOrigPayload into msg.payload BEFORE reading
+    // msg.payload.credential (the fetched status list), so the read
+    // always saw the caller's original body instead of the fetch
+    // result — every credentialStatus-bearing VC silently fell back to
+    // the fail-open "no credential" path, live, regardless of actual
+    // revocation status. Caught only by a live end-to-end test (issue a
+    // VC, revoke it, present it, confirm the log showed fail-open
+    // instead of the reject/accept it should have), not by this test
+    // suite before this test was added — worth being honest about: the
+    // harness eliminates DRIFT from the real code, it does not replace
+    // writing a test case for a real interaction.
+    const { publicKey, privateKey } = await makeConnectorKeys();
+    const bitstring = Buffer.alloc(LIST_SIZE_BITS / 8, 0); // not revoked
+    const jwt = await signStatusListVc(privateKey, zlib.gzipSync(bitstring).toString('base64url'), 'did:web:connector.test#key-1');
+    const originalBody = { counterparty: 'did:web:whatever.example', offerId: 'offer-1' };
+
+    const r = await runNode(VERIFY_FLOW, 'dsp-iam-verify-status-list-fn', {
+        msg: {
+            payload: { format: 'jwt_vc_json', credential: jwt },
+            _iamOrigPayload: originalBody,
+            _iamStatusCheck: {
+                credentialStatus: { statusListCredential: 'x', statusListIndex: '1' },
+                vcKey: publicKey,
+                identity: { did: 'did:web:holder.test', credentialId: 'cred-1' },
+                mode: 'enforce'
+            }
+        }
+    });
+    const out = r.sent[0];
+    assert.equal(JSON.stringify(out.payload), JSON.stringify(originalBody));
+    assert.equal('_iamOrigPayload' in out, false);
+    // And the revocation check must have actually run, not silently
+    // fail-opened because the payload it needed was already gone.
+    assert.equal(r.warnings.some((w) => w.includes('fail-open')), false);
+});
+
 test('verify-status-list: fetch returned no credential → fail-open, identity still set', async () => {
     const { publicKey } = await makeConnectorKeys();
     const r = await runNode(VERIFY_FLOW, 'dsp-iam-verify-status-list-fn', {
