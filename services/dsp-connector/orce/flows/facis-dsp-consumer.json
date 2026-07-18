@@ -1,0 +1,104 @@
+[
+  {
+    "id": "tab-dsp-consumer",
+    "type": "tab",
+    "label": "FACIS DSP — Consumer Ingest",
+    "disabled": false,
+    "info": "POST /dsp/ingest (NF-2 / FR-DL-001 consumer side). Given a\nprovider base URL, an already-negotiated agreementId, and an assetId,\ndrives that provider's own /dsp/transfers endpoint, follows the returned\naccess object, pulls the data, and lands it in this instance's OWN Bronze\nlayer via Kafka (dsp.ingest.raw → bronze.dsp_ingest, see Task 3).\n\nDoes NOT drive contract negotiation itself — negotiation\n(POST /dsp/negotiations) is a separate, already-implemented phase; call\nit first to obtain agreementId. Does NOT attach a VP to its own outbound\ncalls (DSP_IAM_ENFORCE=warn in the live deployment does not require one;\nattaching one is a known follow-up, see orce/README.md's NF-2 section)."
+  },
+  {
+    "id": "dsp-consumer-prep-transfer-fn",
+    "type": "function",
+    "z": "tab-dsp-consumer",
+    "name": "validate request, prep POST /dsp/transfers",
+    "func": "function dspError(statusCode, code, reasons) {\n    return {\n        statusCode: statusCode,\n        headers: { 'Content-Type': 'application/json' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons }\n    };\n}\n\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.providerBaseUrl || !body.assetId || !body.agreementId) {\n    return [dspError(422, 'invalid_request', ['providerBaseUrl, assetId, and agreementId are required']), null];\n}\n\nconst providerBaseUrl = body.providerBaseUrl.replace(/\\/$/, '');\nmsg._dspConsumer = {\n    providerBaseUrl: providerBaseUrl,\n    assetId: body.assetId,\n    agreementId: body.agreementId,\n    windowFrom: body.windowFrom || '',\n    windowTo: body.windowTo || ''\n};\nmsg.url = providerBaseUrl + '/dsp/transfers';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = {\n    agreementId: body.agreementId,\n    assetId: body.assetId,\n    format: 'http-pull',\n    parameters: { windowFrom: msg._dspConsumer.windowFrom, windowTo: msg._dspConsumer.windowTo }\n};\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 250,
+    "y": 80,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "dsp-consumer-prep-get-transfer-fn",
+    "type": "function",
+    "z": "tab-dsp-consumer",
+    "name": "validate transfer-create response, prep GET",
+    "func": "function dspError(statusCode, code, reasons) {\n    return {\n        statusCode: statusCode,\n        headers: { 'Content-Type': 'application/json' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons }\n    };\n}\n\nconst ok = msg.statusCode === 202 && msg.payload && typeof msg.payload === 'object' && typeof msg.payload.transferId === 'string';\nif (!ok) {\n    return [dspError(502, 'provider_transfer_create_failed', ['provider did not return a valid transferId', 'statusCode=' + msg.statusCode, 'payload=' + JSON.stringify(msg.payload)]), null];\n}\n\nmsg._dspConsumer.transferId = msg.payload.transferId;\nmsg.url = msg._dspConsumer.providerBaseUrl + '/dsp/transfers/' + encodeURIComponent(msg.payload.transferId);\nmsg.method = 'GET';\nmsg.payload = '';\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 250,
+    "y": 160,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "dsp-consumer-extract-access-fn",
+    "type": "function",
+    "z": "tab-dsp-consumer",
+    "name": "validate transfer state, extract access.url",
+    "func": "function dspError(statusCode, code, reasons) {\n    return {\n        statusCode: statusCode,\n        headers: { 'Content-Type': 'application/json' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons }\n    };\n}\n\nconst transfer = msg.payload;\nif (!transfer || typeof transfer !== 'object' || transfer.state !== 'COMPLETED') {\n    return [dspError(502, 'provider_transfer_not_completed', ['transfer did not reach COMPLETED', 'state=' + (transfer && transfer.state)]), null];\n}\nif (transfer.format !== 'http-pull' || !transfer.access || !transfer.access.url) {\n    return [dspError(502, 'provider_access_object_missing', ['transfer has no http-pull access.url', 'format=' + transfer.format]), null];\n}\n\nmsg.url = transfer.access.url;\nmsg.method = 'GET';\nmsg.payload = '';\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 250,
+    "y": 240,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "dsp-consumer-prep-envelope-meta-fn",
+    "type": "function",
+    "z": "tab-dsp-consumer",
+    "name": "validate data-pull response, split into rows",
+    "func": "function dspError(statusCode, code, reasons) {\n    return {\n        statusCode: statusCode,\n        headers: { 'Content-Type': 'application/json' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons }\n    };\n}\n\nconst data = msg.payload;\nif (!data || typeof data !== 'object' || !Array.isArray(data.rows)) {\n    return [dspError(502, 'provider_data_pull_failed', ['data endpoint did not return {rows: [...]}', 'statusCode=' + msg.statusCode]), null, null];\n}\n\nconst rows = data.rows;\nconst respMsg = {\n    statusCode: 202,\n    headers: { 'Content-Type': 'application/json' },\n    payload: { status: 'accepted', transferId: msg._dspConsumer.transferId, assetId: msg._dspConsumer.assetId, rowCount: rows.length }\n};\nif (rows.length === 0) {\n    return [null, respMsg, null];\n}\nconst fanoutMsg = {\n    payload: rows,\n    ingest_timestamp: new Date().toISOString(),\n    source_topic: msg._dspConsumer.providerBaseUrl + '/api/data/' + msg._dspConsumer.assetId,\n    _dsp_assetId: msg._dspConsumer.assetId\n};\nreturn [null, respMsg, fanoutMsg];\n",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 250,
+    "y": 320,
+    "wires": [
+      [],
+      [],
+      []
+    ]
+  },
+  {
+    "id": "dsp-consumer-build-envelope-fn",
+    "type": "function",
+    "z": "tab-dsp-consumer",
+    "name": "build Bronze envelope + kafka msg + metric",
+    "func": "const row = msg.payload;\nconst envelope = {\n    ingest_timestamp: msg.ingest_timestamp,\n    source_topic: msg.source_topic,\n    kafka_partition: 0,\n    kafka_offset: 0,\n    kafka_key: msg._dsp_assetId,\n    raw_payload: JSON.stringify(row)\n};\n\nconst m = global.get('metrics') || {};\nm.facis_dsp_ingest_records_published_total = (m.facis_dsp_ingest_records_published_total || 0) + 1;\nglobal.set('metrics', m);\n\nreturn {\n    topic: env.get('DSP_INGEST_TOPIC') || 'dsp.ingest.raw',\n    key: msg._dsp_assetId,\n    payload: JSON.stringify(envelope)\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 250,
+    "y": 400,
+    "wires": [
+      []
+    ]
+  }
+]
