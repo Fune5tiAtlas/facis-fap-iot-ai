@@ -88,6 +88,18 @@ OID4VCI issuer surface, and a MongoDB-backed read API over issued credentials
 | `GET` | `/iam/hub/credentials/:id` | Fetches a single persisted credential by its `_id` (the credential's `jti`) |
 | `GET` | `/iam/hub/participant` | Returns this connector's own `ParticipantCredential` — the DCP Credential-Service pull endpoint counterparties use to fetch it |
 
+### NF-2: Data Lake HTTP Ingest
+
+Provider-side real data serving (replacing the dead `ai-insight-service` Python
+stub at the same path) and consumer-side Bronze ingest — see `orce/README.md`'s
+"NF-2: Data Lake HTTP Ingest" section for the flow details, the
+`SFTP_KAFKA_BROKERS` live-deploy caveat, and the E2E verification script.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/data/:assetId` | HTTP Pull Profile data endpoint — verifies the signed URL and returns the requested dataset's rows from Trino |
+| `POST` | `/dsp/ingest` | Consumer-side: drive a negotiated transfer, pull its data, land it in Bronze |
+
 ### Infrastructure
 
 | Method | Path | Description |

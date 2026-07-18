@@ -17,12 +17,15 @@ orce/
     facis-dsp-iam-verify.json   — NF-1 shared VP/VC verifier (link-call)
     facis-dsp-iam-issuance.json — did.json, OID4VCI issuer, Participant VC self-issuance
     facis-dsp-iam-hub.json      — Identity Hub query API (Mongo-backed)
+    facis-dsp-data.json         — GET /api/data/:assetId (NF-2 provider-side data serving)
+    facis-dsp-consumer.json     — POST /dsp/ingest (NF-2 consumer-side Bronze ingest)
   config/
     datasets.json               — static FACIS_DATASETS mirror (mounted as ConfigMap)
   tests/
     flows/                      — node --test specs
     fixtures/iam/               — golden VP/VC keys + vectors
     harness/run-node.js         — real flow-execution test harness (see Tests below)
+    e2e/                         — manual, live-cluster-only scripts (not run by `node --test`)
     package.json
   README.md (this file)
 ```
@@ -92,3 +95,54 @@ every other service's tabs on the shared pod.
 
 See `helm/facis-dsp-connector/README.md` for the full deploy procedure and
 the ORCE-chart prerequisites (envFrom secrets, volume mounts).
+
+## NF-2: Data Lake HTTP Ingest
+
+`facis-dsp-data.json` (provider) serves real Trino-backed data at
+`GET /api/data/:assetId`, replacing the `ai-insight-service` Python stub at
+the same literal path. That Python route
+(`services/ai-insight-service/src/api/rest/routes/dsp.py`'s `data_router`)
+is left in place but is dead code: the live Ingress never routed
+`/api/data` to it (only to the ORCE `Service`), and the `dataApiBaseUrl`
+default it depended on (`ai-insight.facis.cloud`) has no DNS record or
+Ingress rule either. Deleting the Python route/HMAC modules is a separate,
+explicitly out-of-scope cleanup — `hmac_signing.py`/`hmac_middleware.py`
+are also used by the still-live `POST /api/v1/dsp/create-pull-url` route,
+which this plan does not touch.
+
+`facis-dsp-consumer.json` (consumer) drives an already-negotiated transfer,
+follows its access object, and lands the result in `bronze.dsp_ingest` via
+a new `dsp.ingest.raw` Kafka topic (see
+`services/simulation/scripts/setup_lakehouse.py` /
+`setup_nifi.py`'s `--add-bronze-table` / `--add-topic` flags). It does not
+drive contract negotiation itself and does not attach a VP to its own
+outbound calls to the provider — both are known, explicitly scoped-out
+follow-ups (`DSP_IAM_ENFORCE=warn` in the live deployment does not require
+one today).
+
+Known open item, not fixed as part of this work: `provisionHttpPull()`'s
+signed URLs include a literal `+` in `expiresAt` (e.g. `...123000+00:00`),
+unescaped in the query string. Whether this round-trips correctly through
+a given HTTP client/server's query-string parser (some treat `+` as a
+literal, some as a space) was not exhaustively verified against every
+client this endpoint might see — `tests/e2e/dsp-ingest-e2e.js` exercises
+the real path end-to-end and will fail loudly (signature mismatch) if it
+doesn't for the specific client/server pair it uses.
+
+**Kafka broker config caveat**: the consumer flow's `rdkafka out` node
+reuses `${SFTP_KAFKA_BROKERS}`, an env var rendered by the *sibling*
+`sftp-ingestion-service` Helm chart's Secret, not by this chart's own
+`orce-secret.yaml`. Whether that var is actually visible inside the
+dsp-connector's flows at runtime depends on the shared `orce` chart's
+Deployment `envFrom` list (tracked outside this repo, per the existing
+comment convention in `orce-secret.yaml`). Before running the live E2E
+script below, verify it's present:
+```bash
+kubectl exec -n orce deploy/orce -- env | grep -E 'SFTP_KAFKA_BROKERS|DSP_INGEST_TOPIC'
+```
+If `SFTP_KAFKA_BROKERS` is missing, add a `secretRef` for it to the `orce`
+Deployment's `envFrom` list — otherwise the E2E script fails confusingly
+at the Kafka-produce step with no obvious cause.
+
+Live verification: `node tests/e2e/dsp-ingest-e2e.js --env-file .env.cluster`
+(requires `KUBECONFIG` set and the live cluster's Trino credentials).
