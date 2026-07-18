@@ -81,6 +81,13 @@ dsp:
     #    warn-mode failure in this verifier; "enforce" rejects with 401
     #    credential_revoked. See dsp-iam-verify-status-list-fn in
     #    facis-dsp-iam-verify.json.
+    #    NOTE even in "enforce": any problem actually fetching/verifying
+    #    the status list itself (unreachable, malformed, bad signature)
+    #    fails OPEN, not closed — a revoked credential could pass during
+    #    a status-list outage. This is a deliberate availability-over-
+    #    strictness tradeoff for a control whose absence just returns to
+    #    pre-revocation-checking behaviour; it does not touch VP/VC
+    #    signature verification, which is unaffected and still enforced.
     statusListMode: "warn"
     # -- RESERVED (not yet implemented): local (jose in-flow, default) |
     #    remote (external walt.id verifier). No flow reads this value
