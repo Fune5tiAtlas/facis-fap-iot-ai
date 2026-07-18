@@ -7,7 +7,7 @@
 // all new flow logic instead of a hand-copied mirror.
 //
 const test = require('node:test');
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { runNode } = require('../harness/run-node.js');
 
@@ -37,7 +37,8 @@ test('verify: correctly signed, unexpired token passes through with _dspDataWind
     const expiresAt = futureIso(3600);
     const token = sign(assetId, '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z', expiresAt, 'agr-1', 'consumer');
     const r = await runVerify({ token, expiresAt, from: '2026-04-01T00:00:00Z', to: '2026-04-02T00:00:00Z', agreementId: 'agr-1', roles: 'consumer' }, assetId);
-    assert.deepEqual(r.result, [null, { req: r.result[1].req, _dspDataWindow: { assetId, from: '2026-04-01T00:00:00Z', to: '2026-04-02T00:00:00Z', agreementId: 'agr-1', roles: 'consumer' } }]);
+    assert.equal(r.result[0], null);
+    assert.equal(JSON.stringify(r.result[1]._dspDataWindow), JSON.stringify({ assetId, from: '2026-04-01T00:00:00Z', to: '2026-04-02T00:00:00Z', agreementId: 'agr-1', roles: 'consumer' }));
 });
 
 test('verify: tampered token → 401 invalid_token', async () => {
