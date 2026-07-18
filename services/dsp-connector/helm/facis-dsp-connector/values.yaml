@@ -73,9 +73,14 @@ dsp:
     catalogueMode: "open"
     # -- This connector's own did:web identity (issued Participant VC subject).
     connectorDid: "did:web:fap-iotai.facis.cloud"
-    # -- RESERVED (not yet implemented): enforce | warn | off — intended to
-    #    gate BitstringStatusList revocation checking. No flow reads this
-    #    value today; setting it has no effect.
+    # -- off | warn | enforce. Gates BitstringStatusList revocation
+    #    checking on VCs that carry a credentialStatus claim (VCs without
+    #    one always skip the check regardless of this setting). "off"
+    #    skips the check entirely; "warn" logs a revoked credential but
+    #    still nulls identity/does not block, matching every other
+    #    warn-mode failure in this verifier; "enforce" rejects with 401
+    #    credential_revoked. See dsp-iam-verify-status-list-fn in
+    #    facis-dsp-iam-verify.json.
     statusListMode: "warn"
     # -- RESERVED (not yet implemented): local (jose in-flow, default) |
     #    remote (external walt.id verifier). No flow reads this value

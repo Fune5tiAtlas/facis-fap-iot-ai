@@ -60,7 +60,7 @@
     "type": "function",
     "z": "tab-dsp-iam-hub",
     "name": "drain identityHubPending",
-    "func": "// Drains the in-memory handoff queue tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-push pushes VC records onto. Read-then-clear\n// happens synchronously in this same tick (Node-RED function nodes run\n// on a single-threaded event loop, so there is no concurrent-drain race\n// between this node and the next inject tick), but the queue is cleared\n// BEFORE the Mongo insertMany below actually completes.\n//\n// ponytail: if the insertMany downstream fails (Mongo unreachable, etc.),\n// the drained batch is lost rather than requeued — matches the task's\n// own spec (\"setting it back to [] after reading\"). Acceptable for a\n// best-effort persistence queue; add a requeue-on-error path if\n// durability guarantees are ever needed here.\nconst pending = global.get('identityHubPending') || [];\nif (pending.length === 0) {\n    return null;\n}\nglobal.set('identityHubPending', []);\n\n// dsp-iam-issuance-vc-push (tab-dsp-iam-issuance) hands off records shaped\n// { did, kid, jti, vc, vcJwt, issuedAt, gxdch } — vc is the full nested VC\n// claims object (vc.type is an array, vc.issuer/vc.credentialSubject.id are\n// the DID strings). dsp-iam-hub-query-fn's buildCredentialFilter (Task 11,\n// kept byte-identical to the proven spec) filters on TOP-LEVEL type/issuer/\n// subject/status, none of which exist on the record as-is — so reshape each\n// record into an insertable document that surfaces those 4 fields, derived\n// from the nested vc claims, while keeping the original fields for audit.\n//\n// Also assigns an explicit string _id (the record's own jti — already a\n// unique per-credential identifier) instead of leaving Mongo to generate an\n// ObjectId: node-red-contrib-mongodb4's handleDocId string->ObjectId\n// auto-conversion is documented in its own source as \"DEPRECATED: no\n// longer maintained, do not use in future projects\", so this sidesteps the\n// string-vs-ObjectId _id mismatch entirely instead of depending on it.\nconst docs = pending.map((record) => ({\n    _id: record.jti,\n    type: (record.vc && Array.isArray(record.vc.type) && record.vc.type.length > 0)\n        ? record.vc.type[record.vc.type.length - 1]\n        : 'VerifiableCredential',\n    issuer: (record.vc && record.vc.issuer) || record.did,\n    subject: (record.vc && record.vc.credentialSubject && record.vc.credentialSubject.id) || null,\n    status: 'active',\n    ...record\n}));\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — insertMany(docs) takes a single\n// array-of-documents argument, so payload is [docs], not docs.\nmsg.payload = [docs];\nreturn msg;\n",
+    "func": "// Drains the in-memory handoff queue tab-dsp-iam-issuance's\n// dsp-iam-issuance-vc-push pushes VC records onto. Read-then-clear\n// happens synchronously in this same tick (Node-RED function nodes run\n// on a single-threaded event loop, so there is no concurrent-drain race\n// between this node and the next inject tick), but the queue is cleared\n// BEFORE the Mongo insertMany below actually completes.\n//\n// ponytail: if the insertMany downstream fails (Mongo unreachable, etc.),\n// the drained batch is lost rather than requeued — matches the task's\n// own spec (\"setting it back to [] after reading\"). Acceptable for a\n// best-effort persistence queue; add a requeue-on-error path if\n// durability guarantees are ever needed here.\nconst pending = global.get('identityHubPending') || [];\nif (pending.length === 0) {\n    return null;\n}\nglobal.set('identityHubPending', []);\n\n// dsp-iam-issuance-vc-push (tab-dsp-iam-issuance) hands off records shaped\n// { did, kid, jti, vc, vcJwt, issuedAt, gxdch } — vc is the full nested VC\n// claims object (vc.type is an array, vc.issuer/vc.credentialSubject.id are\n// the DID strings). dsp-iam-hub-query-fn's buildCredentialFilter (Task 11,\n// kept byte-identical to the proven spec) filters on TOP-LEVEL type/issuer/\n// subject/status, none of which exist on the record as-is — so reshape each\n// record into an insertable document that surfaces those 4 fields, derived\n// from the nested vc claims, while keeping the original fields for audit.\n//\n// Also assigns an explicit string _id (the record's own jti — already a\n// unique per-credential identifier) instead of leaving Mongo to generate an\n// ObjectId: node-red-contrib-mongodb4's handleDocId string->ObjectId\n// auto-conversion is documented in its own source as \"DEPRECATED: no\n// longer maintained, do not use in future projects\", so this sidesteps the\n// string-vs-ObjectId _id mismatch entirely instead of depending on it.\nconst docs = pending.map((record) => ({\n    _id: record.jti,\n    type: (record.vc && Array.isArray(record.vc.type) && record.vc.type.length > 0)\n        ? record.vc.type[record.vc.type.length - 1]\n        : 'VerifiableCredential',\n    issuer: (record.vc && record.vc.issuer) || record.did,\n    subject: (record.vc && record.vc.credentialSubject && record.vc.credentialSubject.id) || null,\n    status: 'active',\n    statusListIndex: (typeof record.statusListIndex === 'number') ? record.statusListIndex : null,\n    ...record\n}));\n\n// mongodb4's operation node expects msg.payload to be an ARRAY of the\n// driver call's positional arguments — insertMany(docs) takes a single\n// array-of-documents argument, so payload is [docs], not docs.\nmsg.payload = [docs];\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -245,6 +245,234 @@
     ]
   },
   {
+    "id": "dsp-iam-status-list-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-hub",
+    "name": "GET /iam/status-list",
+    "url": "/iam/status-list",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 420,
+    "wires": [
+      [
+        "dsp-iam-status-list-query-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-status-list-query-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build find args",
+    "func": "// Fetch every credential's revocation-relevant fields. No client\n// input reaches this query (GET has no params), so no injection\n// surface — unlike dsp-iam-hub-query-fn's filter builder, this\n// always queries everything.\nmsg.payload = [{}, { projection: { statusListIndex: 1, status: 1, _id: 0 } }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 420,
+    "wires": [
+      [
+        "dsp-iam-status-list-mongo-find"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-status-list-mongo-find",
+    "type": "mongodb4",
+    "z": "tab-dsp-iam-hub",
+    "name": "find credential statuses",
+    "clientNode": "dsp-iam-hub-mongo-client",
+    "mode": "collection",
+    "collection": "credentials",
+    "operation": "find",
+    "output": "toArray",
+    "maxTimeMS": "0",
+    "handleDocId": false,
+    "x": 700,
+    "y": 420,
+    "wires": [
+      [
+        "dsp-iam-status-list-build-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-status-list-build-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build + sign status list VC",
+    "func": "// Builds and self-signs a W3C BitstringStatusList credential from the\n// Identity Hub's own credential-status records. 131,072 bits\n// (16,384 bytes uncompressed) is the W3C-recommended minimum list\n// size — chosen for privacy (a too-small list would let observers\n// correlate holders by list position), not for our issuance volume,\n// which is far smaller; gzip compresses an overwhelmingly-zero\n// bitstring to a handful of bytes regardless of list size. Bit\n// ordering (MSB-first within each byte) must stay consistent with\n// dsp-iam-verify-status-list-fn's reader — both are this codebase's\n// own code, so internal consistency matters more than matching any\n// external implementation's convention.\nconst LIST_SIZE_BITS = 131072;\n\n(async () => {\n    try {\n        const did = env.get('DSP_CONNECTOR_DID');\n        const rawKey = env.get('DSP_CONNECTOR_KEY');\n        if (!did || !rawKey) {\n            node.error('[iam-hub] DSP_CONNECTOR_DID/DSP_CONNECTOR_KEY not set — cannot sign status list');\n            msg.statusCode = 500;\n            msg.headers = { 'Content-Type': 'application/json' };\n            msg.payload = { error: 'connector identity not provisioned' };\n            return node.send(msg);\n        }\n\n        const bitstring = Buffer.alloc(LIST_SIZE_BITS / 8, 0);\n        const rows = Array.isArray(msg.payload) ? msg.payload : [];\n        for (const row of rows) {\n            if (row.status !== 'revoked') continue;\n            const idx = row.statusListIndex;\n            if (typeof idx !== 'number' || idx < 0 || idx >= LIST_SIZE_BITS) continue;\n            const byteIdx = Math.floor(idx / 8);\n            const bitIdx = 7 - (idx % 8);\n            bitstring[byteIdx] |= (1 << bitIdx);\n        }\n\n        const encodedList = zlib.gzipSync(bitstring).toString('base64url');\n        const kid = did + '#key-1';\n        const id = 'https://' + did.split(':').slice(2).map(decodeURIComponent).join('/') + '/iam/status-list';\n\n        const statusListVc = {\n            '@context': [\n                'https://www.w3.org/2018/credentials/v1',\n                'https://www.w3.org/ns/credentials/status/v1'\n            ],\n            id: id,\n            type: ['VerifiableCredential', 'BitstringStatusListCredential'],\n            issuer: did,\n            issuanceDate: new Date().toISOString(),\n            credentialSubject: {\n                id: id + '#list',\n                type: 'BitstringStatusList',\n                statusPurpose: 'revocation',\n                encodedList: encodedList\n            }\n        };\n\n        const privateJwk = typeof rawKey === 'string' ? JSON.parse(rawKey) : rawKey;\n        const alg = privateJwk.alg || 'ES256';\n        const key = await jose.importJWK(privateJwk, alg);\n        const jwt = await new jose.SignJWT({ vc: statusListVc })\n            .setProtectedHeader({ alg: alg, kid: kid, typ: 'vc+jwt' })\n            .setIssuer(did)\n            .setIssuedAt()\n            .sign(key);\n\n        msg.payload = { format: 'jwt_vc_json', credential: jwt };\n        msg.statusCode = 200;\n        msg.headers = { 'Content-Type': 'application/json' };\n        node.send(msg);\n    } catch (err) {\n        node.error('[iam-hub] status list build failed: ' + err.message, msg);\n        msg.statusCode = 500;\n        msg.headers = { 'Content-Type': 'application/json' };\n        msg.payload = { error: 'internal error building status list' };\n        node.send(msg);\n    }\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose"
+      },
+      {
+        "var": "zlib",
+        "module": "zlib"
+      }
+    ],
+    "x": 950,
+    "y": 420,
+    "wires": [
+      [
+        "dsp-iam-status-list-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-in",
+    "type": "http in",
+    "z": "tab-dsp-iam-hub",
+    "name": "POST /iam/hub/credentials/:id/revoke",
+    "url": "/iam/hub/credentials/:id/revoke",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 230,
+    "y": 480,
+    "wires": [
+      [
+        "dsp-iam-hub-revoke-guard"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-guard",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "Bearer shared-secret guard",
+    "func": "// Bearer shared-secret guard — same pattern and same secret as\n// dsp-iam-issuance-vc-guard (tab-dsp-iam-issuance): both gate a write\n// action of comparable sensitivity (issuing vs. revoking this\n// connector's own credentials), so reusing DSP_OID4VCI_SHARED_SECRET\n// avoids a second Helm value for an equivalent trust boundary rather\n// than being an oversight.\nconst authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || '';\nconst m = /^Bearer\\s+(\\S+)/i.exec(authHeader.trim());\nconst token = m ? m[1] : null;\n\nfunction reject(code, detail) {\n    msg.statusCode = 401;\n    msg.headers = { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' };\n    msg.payload = {\n        '@context': 'https://w3id.org/dspace/2025/1/context.jsonld',\n        '@type': 'dspace:Error',\n        'dspace:code': code,\n        'dspace:reason': [detail]\n    };\n    return [null, msg];\n}\n\nconst sharedSecret = env.get('DSP_OID4VCI_SHARED_SECRET') || '';\n\nif (!token) {\n    return reject('missing_authorization', 'Authorization: Bearer <token> header is required');\n}\n\nif (!sharedSecret) {\n    node.warn('[iam-hub] DSP_OID4VCI_SHARED_SECRET not set — accepting any Bearer token (unauthenticated)');\n    return [msg, null];\n}\n\n// Length check first: length is not secret, and feeding timingSafeEqual\n// mismatched-length buffers throws rather than comparing.\nconst provided = Buffer.from(token, 'utf8');\nconst expected = Buffer.from(sharedSecret, 'utf8');\nconst matches = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);\n\nif (!matches) {\n    return reject('invalid_authorization', 'Bearer token does not match configured shared secret');\n}\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 520,
+    "y": 480,
+    "wires": [
+      [
+        "dsp-iam-hub-revoke-fn"
+      ],
+      [
+        "dsp-iam-hub-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build updateOne args",
+    "func": "msg._revokeId = msg.req.params.id;\nmsg.payload = [{ _id: msg.req.params.id }, { $set: { status: 'revoked' } }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 780,
+    "y": 480,
+    "wires": [
+      [
+        "dsp-iam-hub-mongo-revoke"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-mongo-revoke",
+    "type": "mongodb4",
+    "z": "tab-dsp-iam-hub",
+    "name": "updateOne status=revoked",
+    "clientNode": "dsp-iam-hub-mongo-client",
+    "mode": "collection",
+    "collection": "credentials",
+    "operation": "updateOne",
+    "output": "toArray",
+    "maxTimeMS": "0",
+    "handleDocId": false,
+    "x": 1040,
+    "y": 480,
+    "wires": [
+      [
+        "dsp-iam-hub-revoke-result-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-result-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build response from UpdateResult",
+    "func": "// mongodb4's operation node sets msg.payload to the driver's raw\n// UpdateResult for any non-find/aggregate/watch operation (confirmed\n// by reading node_modules/node-red-contrib-mongodb4/src/mongodb4.js —\n// same verification discipline as the rest of this tab's Mongo\n// integration): { acknowledged, matchedCount, modifiedCount, ... }.\nconst result = msg.payload || {};\nif (!result.matchedCount) {\n    msg.statusCode = 404;\n    msg.payload = { error: 'not found', id: msg._revokeId };\n} else {\n    msg.statusCode = 200;\n    msg.payload = { id: msg._revokeId, status: 'revoked' };\n}\ndelete msg._revokeId;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1300,
+    "y": 480,
+    "wires": [
+      [
+        "dsp-iam-hub-response"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-catch",
+    "type": "catch",
+    "z": "tab-dsp-iam-hub",
+    "name": "catch mongo-revoke errors",
+    "scope": [
+      "dsp-iam-hub-mongo-revoke"
+    ],
+    "uncaught": false,
+    "x": 1060,
+    "y": 540,
+    "wires": [
+      [
+        "dsp-iam-hub-revoke-catch-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-hub-revoke-catch-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-hub",
+    "name": "build 502",
+    "func": "// mongodb4's operation node calls done(err) on failure without ever\n// calling send(msg) — confirmed in its source (see\n// dsp-iam-hub-revoke-result-fn's comment) — so an unhandled Mongo\n// error here would otherwise leave this POST hanging until the\n// ingress's 120s proxy-read-timeout fires a 504, the same class of\n// bug already fixed once in tab-dsp-iam-issuance's vc-push node. This\n// catch node, scoped to just dsp-iam-hub-mongo-revoke, guarantees a\n// real response instead.\nmsg.statusCode = 502;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = {\n    '@context': 'https://w3id.org/dspace/2025/1/context.jsonld',\n    '@type': 'dspace:Error',\n    'dspace:code': 'internal_error',\n    'dspace:reason': ['revoke operation failed: ' + (msg.error && msg.error.message)]\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1300,
+    "y": 540,
+    "wires": [
+      [
+        "dsp-iam-hub-response"
+      ]
+    ]
+  },
+  {
     "id": "dsp-iam-hub-response",
     "type": "http response",
     "z": "tab-dsp-iam-hub",
@@ -253,6 +481,17 @@
     "headers": {},
     "x": 940,
     "y": 260,
+    "wires": []
+  },
+  {
+    "id": "dsp-iam-status-list-response",
+    "type": "http response",
+    "z": "tab-dsp-iam-hub",
+    "name": "200",
+    "statusCode": "",
+    "headers": {},
+    "x": 1200,
+    "y": 420,
     "wires": []
   }
 ]

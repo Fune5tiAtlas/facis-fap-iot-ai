@@ -135,8 +135,8 @@
     "type": "function",
     "z": "tab-dsp-iam-verify",
     "name": "verify VC signature",
-    "func": "function dspError(code, detail) {\n    return {\n        statusCode: 401,\n        headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': [detail] }\n    };\n}\n\nfunction reject(msg, code, detail) {\n    delete msg._iamOrigPayload;\n    const err = dspError(code, detail);\n    if (msg._iamMode === 'enforce') {\n        Object.assign(msg, err);\n        msg.identity = null;\n        msg.iamRejected = true;\n    } else {\n        msg.identity = null;\n        msg.iamRejected = false;\n        node.warn('[iam-verify] warn-mode: ' + code + ' — ' + detail);\n    }\n    return msg;\n}\n\nfunction findJwk(doc, kid) {\n    const vm = doc.verificationMethod.find(v => v.id === kid || v.id === (kid || '').split('#').pop());\n    if (!vm || !vm.publicKeyJwk) throw new Error('verificationMethod not found for kid=' + kid);\n    return vm.publicKeyJwk;\n}\n\n// `jose` here is in scope from this node's own `libs` declaration below.\n// Each function node's sandbox is independent — libs declared on\n// dsp-iam-verify-vp are NOT visible here, hence the separate declaration.\n\n(async () => {\n    const vc = msg._iamVc;\n    if (!vc) {\n        node.error('[iam-verify] missing _iamVc context — programmer error, check wiring');\n        node.send(reject(msg, 'invalid_signature', 'internal verifier error'));\n        return;\n    }\n\n    // This response came either from dsp-iam-verify-vp's cache-hit branch\n    // (msg._iamVc.vcDoc already set) or from the http-request node\n    // (msg.payload is the fetched did.json body) — the same\n    // `didDoc || msg.payload` convention the VP stage uses, so a cache-hit's\n    // carried-forward doc is never confused with an unrelated msg.payload.\n    const vcDoc = vc.vcDoc || msg.payload;\n    if ('_iamOrigPayload' in msg) msg.payload = msg._iamOrigPayload;\n    if (!vcDoc || !Array.isArray(vcDoc.verificationMethod)) {\n        node.send(reject(msg, 'key_mismatch', 'did.json unresolvable or malformed: ' + vc.vcDidUrl));\n        return;\n    }\n    if (!vc.vcDoc) {\n        const cache = global.get('iamDidCache') || new Map();\n        cache.set(vc.vcDidUrl, { doc: vcDoc, fetchedAt: Date.now() });\n        global.set('iamDidCache', cache);\n    }\n\n    let vcKey;\n    try {\n        vcKey = await jose.importJWK(findJwk(vcDoc, vc.vcHeader.kid), vc.vcHeader.alg);\n    } catch (err) {\n        node.send(reject(msg, 'key_mismatch', 'could not resolve VC issuer key: ' + err.message));\n        return;\n    }\n\n    try {\n        await jose.jwtVerify(vc.vcToken, vcKey);\n    } catch (err) {\n        if (err && err.code === 'ERR_JWT_EXPIRED') { node.send(reject(msg, 'token_expired', 'VC expired')); return; }\n        node.send(reject(msg, 'invalid_credential', 'VC signature verification failed: ' + err.message));\n        return;\n    }\n\n    msg.identity = {\n        did: vc.holderDid,\n        roles: vc.subject.roles || [],\n        credentialId: vc.vcPayload.jti || vc.vcPayload.id || null,\n        verifiedAt: new Date().toISOString()\n    };\n    msg.iamRejected = false;\n    delete msg._iamVc;\n    delete msg._iamOrigPayload;\n    node.send(msg);\n})();\nreturn;\n",
-    "outputs": 1,
+    "func": "function dspError(code, detail) {\n    return {\n        statusCode: 401,\n        headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': [detail] }\n    };\n}\n\nfunction reject(msg, code, detail) {\n    delete msg._iamOrigPayload;\n    const err = dspError(code, detail);\n    if (msg._iamMode === 'enforce') {\n        Object.assign(msg, err);\n        msg.identity = null;\n        msg.iamRejected = true;\n    } else {\n        msg.identity = null;\n        msg.iamRejected = false;\n        node.warn('[iam-verify] warn-mode: ' + code + ' — ' + detail);\n    }\n    return msg;\n}\n\nfunction findJwk(doc, kid) {\n    const vm = doc.verificationMethod.find(v => v.id === kid || v.id === (kid || '').split('#').pop());\n    if (!vm || !vm.publicKeyJwk) throw new Error('verificationMethod not found for kid=' + kid);\n    return vm.publicKeyJwk;\n}\n\n// `jose` here is in scope from this node's own `libs` declaration below.\n// Each function node's sandbox is independent — libs declared on\n// dsp-iam-verify-vp are NOT visible here, hence the separate declaration.\n\n(async () => {\n    const vc = msg._iamVc;\n    if (!vc) {\n        node.error('[iam-verify] missing _iamVc context — programmer error, check wiring');\n        node.send(reject(msg, 'invalid_signature', 'internal verifier error'));\n        return;\n    }\n\n    // This response came either from dsp-iam-verify-vp's cache-hit branch\n    // (msg._iamVc.vcDoc already set) or from the http-request node\n    // (msg.payload is the fetched did.json body) — the same\n    // `didDoc || msg.payload` convention the VP stage uses, so a cache-hit's\n    // carried-forward doc is never confused with an unrelated msg.payload.\n    const vcDoc = vc.vcDoc || msg.payload;\n    if ('_iamOrigPayload' in msg) msg.payload = msg._iamOrigPayload;\n    if (!vcDoc || !Array.isArray(vcDoc.verificationMethod)) {\n        node.send(reject(msg, 'key_mismatch', 'did.json unresolvable or malformed: ' + vc.vcDidUrl));\n        return;\n    }\n    if (!vc.vcDoc) {\n        const cache = global.get('iamDidCache') || new Map();\n        cache.set(vc.vcDidUrl, { doc: vcDoc, fetchedAt: Date.now() });\n        global.set('iamDidCache', cache);\n    }\n\n    let vcKey;\n    try {\n        vcKey = await jose.importJWK(findJwk(vcDoc, vc.vcHeader.kid), vc.vcHeader.alg);\n    } catch (err) {\n        node.send(reject(msg, 'key_mismatch', 'could not resolve VC issuer key: ' + err.message));\n        return;\n    }\n\n    try {\n        await jose.jwtVerify(vc.vcToken, vcKey);\n    } catch (err) {\n        if (err && err.code === 'ERR_JWT_EXPIRED') { node.send(reject(msg, 'token_expired', 'VC expired')); return; }\n        node.send(reject(msg, 'invalid_credential', 'VC signature verification failed: ' + err.message));\n        return;\n    }\n\n    const identity = {\n        did: vc.holderDid,\n        roles: vc.subject.roles || [],\n        credentialId: vc.vcPayload.jti || vc.vcPayload.id || null,\n        verifiedAt: new Date().toISOString()\n    };\n    delete msg._iamVc;\n\n    // BitstringStatusList revocation check (net-new, gated by\n    // DSP_STATUS_LIST_MODE=off|warn|enforce). credentialStatus is optional\n    // on a VC — most VCs won't carry one, and a VC without it always skips\n    // straight through here unchanged, exactly like before this check\n    // existed. See dsp-iam-verify-status-list-fn for the fetch+decode.\n    const statusListMode = (env.get('DSP_STATUS_LIST_MODE') || 'warn').toLowerCase();\n    const credentialStatus = vc.vcPayload.vc && vc.vcPayload.vc.credentialStatus;\n    if (statusListMode === 'off' || !credentialStatus || !credentialStatus.statusListCredential) {\n        msg.identity = identity;\n        msg.iamRejected = false;\n        delete msg._iamOrigPayload;\n        node.send([msg, null]);\n        return;\n    }\n\n    // Function nodes have no fetch API (see this tab's own info blurb), so\n    // the status list fetch is a real http-request node, same as DID\n    // resolution. vcKey carries forward to verify the status list's own\n    // signature without a second DID lookup — this design only\n    // self-issues, so the status list and every VC it can be attached to\n    // always share one issuer key.\n    msg._iamStatusCheck = { credentialStatus, vcKey, identity, mode: statusListMode };\n    msg.url = credentialStatus.statusListCredential;\n    node.send([null, msg]);\n})();\nreturn;\n",
+    "outputs": 2,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
@@ -149,6 +149,62 @@
     ],
     "x": 1140,
     "y": 260,
+    "wires": [
+      [
+        "dsp-iam-return"
+      ],
+      [
+        "dsp-iam-resolve-status-list"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-resolve-status-list",
+    "type": "http request",
+    "z": "tab-dsp-iam-verify",
+    "name": "GET status list credential",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1140,
+    "y": 400,
+    "wires": [
+      [
+        "dsp-iam-verify-status-list-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-verify-status-list-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-verify",
+    "name": "verify status list + check bit",
+    "func": "function dspError(code, detail) {\n    return {\n        statusCode: 401,\n        headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' },\n        payload: { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': [detail] }\n    };\n}\n\nfunction rejectRevoked(msg, mode, detail) {\n    delete msg._iamOrigPayload;\n    const err = dspError('credential_revoked', detail);\n    if (mode === 'enforce') {\n        Object.assign(msg, err);\n        msg.identity = null;\n        msg.iamRejected = true;\n    } else {\n        msg.identity = null;\n        msg.iamRejected = false;\n        node.warn('[iam-verify] warn-mode: credential_revoked — ' + detail);\n    }\n    return msg;\n}\n\n// jose/zlib are in scope from this node's own libs declaration below.\n// Each function node's sandbox is independent — libs declared on\n// dsp-iam-verify-vc are NOT visible here.\n\n(async () => {\n    const check = msg._iamStatusCheck;\n    delete msg._iamStatusCheck;\n    if ('_iamOrigPayload' in msg) msg.payload = msg._iamOrigPayload;\n    if (!check) {\n        node.error('[iam-verify] missing _iamStatusCheck context — programmer error, check wiring');\n        msg.identity = null;\n        msg.iamRejected = false;\n        delete msg._iamOrigPayload;\n        node.send(msg);\n        return;\n    }\n\n    function proceed() {\n        msg.identity = check.identity;\n        msg.iamRejected = false;\n        delete msg._iamOrigPayload;\n        node.send(msg);\n    }\n\n    // Fail-open on infra problems below (unreachable/malformed status\n    // list, bad signature): this is an availability-vs-security\n    // tradeoff for a control whose absence merely returns to\n    // pre-status-list behaviour, not a hole in identity verification\n    // itself — the VP/VC signature checks that already passed by the\n    // time this node runs are entirely unaffected. Every fail-open\n    // path is logged via node.warn so a persistently-unreachable\n    // status list is operationally visible, not silently ignored.\n    const statusListJwt = msg.payload && msg.payload.credential;\n    if (!statusListJwt) {\n        node.warn('[iam-verify] status list fetch returned no credential — skipping revocation check (fail-open): ' + check.credentialStatus.statusListCredential);\n        return proceed();\n    }\n\n    let slPayload;\n    try {\n        const verified = await jose.jwtVerify(statusListJwt, check.vcKey);\n        slPayload = verified.payload;\n    } catch (err) {\n        node.warn('[iam-verify] status list signature invalid — skipping revocation check (fail-open): ' + err.message);\n        return proceed();\n    }\n\n    try {\n        const encodedList = slPayload.vc && slPayload.vc.credentialSubject && slPayload.vc.credentialSubject.encodedList;\n        const compressed = Buffer.from(encodedList, 'base64url');\n        const bitstring = zlib.gunzipSync(compressed);\n        const idx = Number(check.credentialStatus.statusListIndex);\n        const byteIdx = Math.floor(idx / 8);\n        const bitIdx = 7 - (idx % 8);\n        const revoked = ((bitstring[byteIdx] >> bitIdx) & 1) === 1;\n\n        if (!revoked) {\n            return proceed();\n        }\n\n        node.send(rejectRevoked(msg, check.mode, 'credential ' + (check.identity.credentialId || '') + ' has been revoked'));\n    } catch (err) {\n        node.warn('[iam-verify] status list decode failed — skipping revocation check (fail-open): ' + err.message);\n        return proceed();\n    }\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose"
+      },
+      {
+        "var": "zlib",
+        "module": "zlib"
+      }
+    ],
+    "x": 1400,
+    "y": 400,
     "wires": [
       [
         "dsp-iam-return"

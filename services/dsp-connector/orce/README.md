@@ -22,6 +22,7 @@ orce/
   tests/
     flows/                      — node --test specs
     fixtures/iam/               — golden VP/VC keys + vectors
+    harness/run-node.js         — real flow-execution test harness (see Tests below)
     package.json
   README.md (this file)
 ```
@@ -59,9 +60,25 @@ npm install --include=dev
 node --test tests/flows
 ```
 
-The specs re-implement each function-node body inline and exercise it under
+Most specs re-implement each function-node body inline and exercise it under
 `node:test`. **Invariant**: keep the spec helpers in sync with the function-node
-`func` strings in the corresponding flow JSON.
+`func` strings in the corresponding flow JSON — this convention has a known
+weakness (a real flow-JSON edit can drift from its hand-copied spec without
+any test failing) documented in `tests/harness/run-node.js`'s header.
+
+`tests/flows/iam-revocation-harness.spec.js` uses a different pattern:
+`tests/harness/run-node.js` executes a `type:"function"` node's `func`
+string read directly from the flow JSON at test-run time, in a `vm`
+sandbox built to match Node-RED's real function-node sandbox (same
+restricted globals, same `libs` resolution against real npm packages).
+There is no hand-copied mirror to drift — the test always exercises
+whatever is actually committed. Scope, honestly: it runs one function node
+in isolation per call (fixture `msg` in, captured `node.send()`/return
+value out); it does not boot a real Node-RED runtime or walk `http
+in`/`link call`/wire chains automatically. New flow logic with meaningful
+branching is a good candidate for this pattern instead of a new
+hand-mirrored spec file; porting the existing hand-mirrored specs is a
+separate, larger follow-up, not done as part of adding this.
 
 ## Deploy
 
