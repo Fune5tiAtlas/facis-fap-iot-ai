@@ -11,69 +11,53 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { runNode } = require('../harness/run-node.js');
 
 const DATA_FLOW = '../flows/facis-dsp-data.json';
 
-// dsp-data-lookup-fn hardcodes /data/dsp-config/datasets.json — the real
-// pod's read-only ConfigMap mount (see that node's own comment in
-// facis-dsp-data.json for why it re-reads this file directly instead of
-// sharing facis-dsp-catalogue.json's flow-context cache). This test runs
-// the node's REAL code via run-node.js, so it needs that exact absolute
-// path to exist; provision it from the committed source file (never
-// duplicated inline, so this fixture can't drift from the real catalogue)
-// and clean it up afterward. Requires a writable "/", true on any normal
-// Linux dev box, CI runner, or container — NOT on a macOS host with
-// System Integrity Protection's sealed root volume. Guarded rather than
-// left to throw: an unguarded before() failure would cascade-fail every
-// test in this file, including the four that have nothing to do with
-// /data; instead only the two lookup-fn tests that actually need the
-// fixture are skipped when it can't be provisioned.
-const DSP_CONFIG_DIR = '/data/dsp-config';
-const DSP_CONFIG_FILE = path.join(DSP_CONFIG_DIR, 'datasets.json');
+// dsp-data-lookup-fn reads its path via env.get('DSP_DATASETS_PATH') with
+// the real pod's ConfigMap mount (/data/dsp-config/datasets.json) as the
+// production default — this test overrides that env var to point at a
+// tmpdir fixture instead, so it never has to touch "/" (always writable,
+// no root needed, works on every OS/CI). Fixture content is copied from
+// the committed source file, never duplicated inline, so it can't drift
+// from the real catalogue.
+const TMP_DATASETS_FILE = path.join(os.tmpdir(), 'dsp-data-trino-harness-datasets.json');
 const REAL_DATASETS_FILE = path.join(__dirname, '../../config/datasets.json');
-let dspConfigAvailable = false;
 
 before(() => {
-    try {
-        fs.mkdirSync(DSP_CONFIG_DIR, { recursive: true });
-        fs.copyFileSync(REAL_DATASETS_FILE, DSP_CONFIG_FILE);
-        dspConfigAvailable = true;
-    } catch (err) {
-        console.warn('dsp-data-trino-harness.spec.js: could not provision ' + DSP_CONFIG_FILE +
-            ' (' + (err && err.message ? err.message : err) + ') — skipping the two lookup-fn tests ' +
-            'that need it. Run under Docker/Linux CI for a writable "/" to exercise those.');
-    }
+    fs.copyFileSync(REAL_DATASETS_FILE, TMP_DATASETS_FILE);
 });
 
 after(() => {
-    if (dspConfigAvailable) fs.rmSync(DSP_CONFIG_FILE, { force: true });
+    fs.rmSync(TMP_DATASETS_FILE, { force: true });
 });
 
 function baseWindow(overrides) {
     return Object.assign({ assetId: 'dataset:facis:net-grid-hourly', from: '', to: '', agreementId: '', roles: '' }, overrides);
 }
 
-test('lookup: known assetId resolves schema/table/timeColumn from the real datasets.json', (t) => {
-    if (!dspConfigAvailable) return t.skip('/data/dsp-config not writable on this host');
-    return (async () => {
-        const r = await runNode(DATA_FLOW, 'dsp-data-lookup-fn', { msg: { _dspDataWindow: baseWindow() } });
-        assert.equal(r.result[0]._dspDataWindow.schema, 'gold');
-        assert.equal(r.result[0]._dspDataWindow.table, 'net_grid_hourly');
-        assert.equal(r.result[0]._dspDataWindow.timeColumn, 'hour');
-        assert.equal(r.result[1], null);
-    })();
+test('lookup: known assetId resolves schema/table/timeColumn from the real datasets.json', async () => {
+    const r = await runNode(DATA_FLOW, 'dsp-data-lookup-fn', {
+        env: { DSP_DATASETS_PATH: TMP_DATASETS_FILE },
+        msg: { _dspDataWindow: baseWindow() }
+    });
+    assert.equal(r.result[0]._dspDataWindow.schema, 'gold');
+    assert.equal(r.result[0]._dspDataWindow.table, 'net_grid_hourly');
+    assert.equal(r.result[0]._dspDataWindow.timeColumn, 'hour');
+    assert.equal(r.result[1], null);
 });
 
-test('lookup: unknown assetId → 404 asset_not_found', (t) => {
-    if (!dspConfigAvailable) return t.skip('/data/dsp-config not writable on this host');
-    return (async () => {
-        const r = await runNode(DATA_FLOW, 'dsp-data-lookup-fn', { msg: { _dspDataWindow: baseWindow({ assetId: 'dataset:facis:does-not-exist' }) } });
-        assert.equal(r.result[0], null);
-        assert.equal(r.result[1].statusCode, 404);
-        assert.equal(r.result[1].payload['dspace:code'], 'asset_not_found');
-    })();
+test('lookup: unknown assetId → 404 asset_not_found', async () => {
+    const r = await runNode(DATA_FLOW, 'dsp-data-lookup-fn', {
+        env: { DSP_DATASETS_PATH: TMP_DATASETS_FILE },
+        msg: { _dspDataWindow: baseWindow({ assetId: 'dataset:facis:does-not-exist' }) }
+    });
+    assert.equal(r.result[0], null);
+    assert.equal(r.result[1].statusCode, 404);
+    assert.equal(r.result[1].payload['dspace:code'], 'asset_not_found');
 });
 
 test('trino: single-page result is returned as {assetId, schema, table, columns, rows, rowCount}', async () => {
