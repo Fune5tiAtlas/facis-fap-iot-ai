@@ -135,14 +135,36 @@ reuses `${SFTP_KAFKA_BROKERS}`, an env var rendered by the *sibling*
 `orce-secret.yaml`. Whether that var is actually visible inside the
 dsp-connector's flows at runtime depends on the shared `orce` chart's
 Deployment `envFrom` list (tracked outside this repo, per the existing
-comment convention in `orce-secret.yaml`). Before running the live E2E
-script below, verify it's present:
-```bash
-kubectl exec -n orce deploy/orce -- env | grep -E 'SFTP_KAFKA_BROKERS|DSP_INGEST_TOPIC'
-```
-If `SFTP_KAFKA_BROKERS` is missing, add a `secretRef` for it to the `orce`
-Deployment's `envFrom` list — otherwise the E2E script fails confusingly
-at the Kafka-produce step with no obvious cause.
+comment convention in `orce-secret.yaml`). Step 3 of the checklist below
+verifies it's present before the E2E script runs — if `SFTP_KAFKA_BROKERS`
+is missing, add a `secretRef` for it to the `orce` Deployment's `envFrom`
+list — otherwise the E2E script fails confusingly at the Kafka-produce step
+with no obvious cause.
 
-Live verification: `node tests/e2e/dsp-ingest-e2e.js --env-file .env.cluster`
-(requires `KUBECONFIG` set and the live cluster's Trino credentials).
+### Live deploy checklist (requires live cluster access — not automated)
+
+```bash
+export KUBECONFIG=/Users/danielpires/Developer/Ciberseg/Atlas/k8s/K8s-cluster-IONOS-cloud.yaml
+
+# 1. Provision Bronze + NiFi (additive, does not touch the 9 live sim flows)
+cd services/simulation
+python scripts/setup_lakehouse.py --env-file .env.cluster --add-bronze-table dsp.ingest.raw
+python scripts/setup_nifi.py --env-file .env.cluster --add-topic dsp.ingest.raw
+
+# 2. Apply the updated Ingress
+kubectl apply -f infrastructure/ingress/facis-ingress.yaml
+
+# 3. Verify SFTP_KAFKA_BROKERS / DSP_INGEST_TOPIC are visible to the ORCE pod
+#    (see the caveat above — add the envFrom entry if missing before continuing)
+kubectl exec -n orce deploy/orce -- env | grep -E 'SFTP_KAFKA_BROKERS|DSP_INGEST_TOPIC'
+
+# 4. Upgrade the dsp-connector Helm release (deploys the two new flow tabs
+#    via the existing atomic POST /flows merge-by-id job)
+cd services/dsp-connector/helm/facis-dsp-connector
+helm upgrade facis-dsp-connector . -n orce \
+  --set dsp.trino.password=<the live trino-users password>
+
+# 5. Run the live E2E script
+cd ../../orce/tests
+node e2e/dsp-ingest-e2e.js --env-file .env.cluster
+```

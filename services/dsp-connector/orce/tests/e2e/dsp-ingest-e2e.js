@@ -36,20 +36,22 @@ function req(method, url, body, headers) {
             });
         });
         r.on('error', reject);
-        if (body) r.write(JSON.stringify(body));
+        if (body) r.write(typeof body === 'string' ? body : JSON.stringify(body));
         r.end();
     });
 }
 
 async function trinoRowCount(trinoUrl, catalog, user, password) {
     const auth = 'Basic ' + Buffer.from(user + ':' + password).toString('base64');
-    const first = await req('POST', trinoUrl + '/v1/statement', undefined, { Authorization: auth, 'X-Trino-User': user, 'X-Trino-Catalog': catalog, 'X-Trino-Schema': 'bronze' });
+    // Headers match dsp-data-trino-fn's own Trino calls (Task 2, proven-working
+    // reference): Basic auth, X-Trino-Catalog/Schema, text/plain body (raw SQL).
+    const headers = { Authorization: auth, 'X-Trino-User': user, 'X-Trino-Catalog': catalog, 'X-Trino-Schema': 'bronze', 'Content-Type': 'text/plain' };
+    const sql = 'SELECT COUNT(*) FROM "' + catalog + '".bronze.dsp_ingest';
     // For brevity this only reads the first page's row count column; a
     // COUNT(*) query always returns exactly one row in one page.
-    let result = first.body;
+    let result = (await req('POST', trinoUrl + '/v1/statement', sql, headers)).body;
     while (result && result.nextUri && !result.data) {
-        const next = await req('GET', result.nextUri);
-        result = next.body;
+        result = (await req('GET', result.nextUri, undefined, headers)).body;
     }
     return result && result.data ? Number(result.data[0][0]) : null;
 }
