@@ -10,8 +10,24 @@ metadata:
 data:
 {{- $flowsDir := .Values.orceFlowDeploy.flowsDir | default "orce-flows" }}
 {{- $glob := printf "files/%s/*.json" $flowsDir }}
+  {{/*
+    node-red-contrib-mongodb4's client config node takes its `uri` field
+    literally (src/mongodb4.js: `mongoUri = config.uri;`) — it does NOT
+    resolve Node-RED's `${VAR}` env-substitution syntax the way core
+    credential-typed fields do. facis-dsp-iam-hub.json's mongo client
+    config node relies on that substitution ("uri": "${DSP_MONGO_URI}"),
+    so without this replace the literal 19-char placeholder string gets
+    handed to the Mongo driver as a connection string and every query
+    hangs waiting on a connection that never resolves. Only the
+    in-cluster default case (mongo.uriSecret unset) is substitutable here
+    — see the matching NOTE in orce-secret.yaml.
+  */}}
+{{- $mongoUri := "" }}
+{{- if not .Values.dsp.iam.mongo.uriSecret }}
+{{- $mongoUri = printf "mongodb://%s-mongo:27017/identity_hub" (include "facis-dsp-connector.fullname" .) }}
+{{- end }}
 {{- range $path, $bytes := .Files.Glob $glob }}
   {{ base $path | quote }}: |
-{{ $.Files.Get $path | indent 4 }}
+{{ $.Files.Get $path | replace "${DSP_MONGO_URI}" $mongoUri | indent 4 }}
 {{- end }}
 {{- end }}
