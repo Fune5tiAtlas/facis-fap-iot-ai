@@ -30,6 +30,8 @@ spec:
         - name: flows
           configMap:
             name: {{ include "facis-dsp-connector.fullname" . }}-orce-flows
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: deploy
           image: "{{ .Values.orceFlowDeploy.jobImage.repository }}:{{ .Values.orceFlowDeploy.jobImage.tag }}"
@@ -52,72 +54,95 @@ spec:
               sleep "${PRE_DEPLOY_SLEEP}"
 
               cd /flows
-              # Per-tab PUT (fallback POST on 404) — NEVER a full-replace
-              # POST /flows. This pod is shared with Simulation/AI-Insight/
-              # SFTP flows; a full-replace deploy from this chart alone would
-              # wipe every other service's tabs (the known destructive-deploy
-              # hazard — see feedback_orce_full_deploy_destructive in
-              # project memory). Deploy one tab object at a time instead.
-              FAILED=0
+              # Single atomic POST /flows (v2, Node-RED-Deployment-Type:
+              # nodes) built by merging this chart's tabs into the live
+              # GET /flows result by node id — NEVER a naive full-replace
+              # from this chart's files alone. This pod is shared with
+              # Simulation/AI-Insight/SFTP flows; truncating to just what
+              # this chart renders would wipe every other service's tabs
+              # (the known destructive-deploy hazard — see
+              # feedback_orce_full_deploy_destructive in project memory).
+              # Starting from the live GET result and only replacing node
+              # ids that belong to THIS chart's tabs avoids that entirely.
+              #
+              # Why not per-tab PUT/POST like before: PUT /flow/:id only
+              # works once a tab already exists under that exact id: the
+              # id it was FIRST created with. Creating a new tab has to go
+              # through POST /flow (singular, "add a flow"), and that
+              # endpoint unconditionally overwrites whatever id is in the
+              # payload with a fresh, random one — confirmed by reading
+              # @node-red/runtime/lib/flows/index.js's addFlow:
+              # `flow.id = redUtil.generateId();`, no way to opt out. So a
+              # tab created that way could never be found again by the id
+              # in its own source file on the next deploy — PUT would
+              # 404, fall back to POST, and create a SECOND tab with a
+              # second random id, whose nodes collide with the first
+              # copy's ("duplicate id"). POST /flows (plural, the whole
+              # config) is the only admin-API path that takes node ids
+              # as given, because it treats the payload as the intended
+              # full state and diffs it against what is currently
+              # running rather than allocating anything.
+              TMP=/tmp
+              RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
+                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                -H "Node-RED-API-Version: v2" \
+                "${ORCE_ADMIN_URL}/flows")
+              HTTP_CODE=$(printf '%s' "$RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
+              BODY=$(printf '%s' "$RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
+              if [ "$HTTP_CODE" != "200" ]; then
+                echo "[orce-flow-deploy] FAIL fetching current flows: http $HTTP_CODE"
+                echo "$BODY"
+                exit 1
+              fi
+              printf '%s' "$BODY" > "$TMP/current-flows.json"
+              REV=$(jq -r '.rev' "$TMP/current-flows.json")
+              jq -c '.flows' "$TMP/current-flows.json" > "$TMP/merged.json"
+
               for f in *.json; do
                 TAB_ID=$(jq -r '.[] | select(.type=="tab") | .id' "$f")
                 if [ -z "$TAB_ID" ]; then
                   echo "[orce-flow-deploy] SKIP $f — no tab object found"
                   continue
                 fi
-                PAYLOAD=$(jq -c --arg id "$TAB_ID" '
-                  (map(select(.type=="tab" and .id==$id)) | .[0]) as $tab |
-                  {
-                    id: $id,
-                    label: $tab.label,
-                    disabled: ($tab.disabled // false),
-                    info: ($tab.info // ""),
-                    nodes: map(select(.type != "tab"))
-                  }
-                ' "$f")
-
-                RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
-                  -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
-                  -H "Content-Type: application/json" \
-                  -X PUT "${ORCE_ADMIN_URL}/flow/${TAB_ID}" \
-                  --data "$PAYLOAD")
-                HTTP_CODE=$(printf '%s' "$RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
-                BODY=$(printf '%s' "$RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
-
-                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-                  echo "[orce-flow-deploy] PUT $f (tab $TAB_ID) ok ($HTTP_CODE)"
-                elif [ "$HTTP_CODE" = "404" ]; then
-                  echo "[orce-flow-deploy] tab $TAB_ID not found — creating via POST /flow"
-                  CREATE_RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
-                    -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
-                    -H "Content-Type: application/json" \
-                    -X POST "${ORCE_ADMIN_URL}/flow" \
-                    --data "$PAYLOAD")
-                  CREATE_CODE=$(printf '%s' "$CREATE_RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
-                  CREATE_BODY=$(printf '%s' "$CREATE_RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
-                  if [ "$CREATE_CODE" = "200" ] || [ "$CREATE_CODE" = "201" ]; then
-                    echo "[orce-flow-deploy] POST $f (tab $TAB_ID) created ($CREATE_CODE)"
-                  else
-                    echo "[orce-flow-deploy] FAIL creating $f (tab $TAB_ID): http $CREATE_CODE"
-                    echo "$CREATE_BODY"
-                    FAILED=1
-                  fi
-                else
-                  echo "[orce-flow-deploy] FAIL updating $f (tab $TAB_ID): http $HTTP_CODE"
-                  echo "$BODY"
-                  FAILED=1
-                fi
+                # Drop every node from the live set whose id is about to be
+                # reinserted from this file (the old tab node itself, plus
+                # every one of its child/config nodes, matched by id — not
+                # by z, since config nodes commonly have no z at all), then
+                # append this file's nodes verbatim.
+                NEW_IDS=$(jq -c '[.[].id]' "$f")
+                jq -c --argjson newids "$NEW_IDS" \
+                  'map(select(.id as $i | ($newids | index($i)) == null))' \
+                  "$TMP/merged.json" > "$TMP/merged.filtered.json"
+                jq -s '.[0] + .[1]' "$TMP/merged.filtered.json" "$f" > "$TMP/merged.json"
+                echo "[orce-flow-deploy] merged $f (tab $TAB_ID)"
               done
 
-              if [ "$FAILED" = "1" ]; then
-                echo "[orce-flow-deploy] one or more tabs failed to deploy — see above"
+              jq -n --arg rev "$REV" --slurpfile flows "$TMP/merged.json" \
+                '{rev: $rev, flows: $flows[0]}' > "$TMP/deploy-payload.json"
+
+              RESPONSE=$(curl -sS -w '\n___HTTP_STATUS___:%{http_code}' \
+                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -H "Node-RED-API-Version: v2" \
+                -H "Node-RED-Deployment-Type: nodes" \
+                -X POST "${ORCE_ADMIN_URL}/flows" \
+                --data "@$TMP/deploy-payload.json")
+              HTTP_CODE=$(printf '%s' "$RESPONSE" | grep -o '___HTTP_STATUS___:[0-9]*$' | cut -d: -f2)
+              BODY=$(printf '%s' "$RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
+
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "[orce-flow-deploy] deploy ok (single atomic POST /flows, nodes mode)"
+              else
+                echo "[orce-flow-deploy] FAIL deploying merged flows: http $HTTP_CODE"
+                echo "$BODY"
                 exit 1
               fi
-              echo "[orce-flow-deploy] deploy ok (per-tab)"
           volumeMounts:
             - name: flows
               mountPath: /flows
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 50m
