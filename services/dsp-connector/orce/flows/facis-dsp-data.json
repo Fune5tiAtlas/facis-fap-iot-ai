@@ -1,0 +1,63 @@
+[
+  {
+    "id": "tab-dsp-data",
+    "type": "tab",
+    "label": "FACIS DSP — Data Pull",
+    "disabled": false,
+    "info": "GET /api/data/:assetId — HTTP Pull Profile data endpoint (NF-2 /\nFR-DL-001). Verifies the HMAC-signed URL produced by dsp-tx-create's\nprovisionHttpPull() (see facis-dsp-transfers.json), then serves the\nrequested Gold-layer dataset from Trino (facis-dsp-data.json / Task 2).\n\nReplaces the ai-insight-service Python stub at the same literal path\n(services/ai-insight-service/src/api/rest/routes/dsp.py's data_router),\nwhich only ever returned {\"status\":\"authorized\"} and — separately — was\nnever reachable via the live Ingress at all (no /api/data rule existed\nthere until this flow added one; see infrastructure/ingress/facis-ingress.yaml).\nThe Python route is left in place but is now dead code; not deleted here,\nsee orce/README.md's NF-2 section for why."
+  },
+  {
+    "id": "dsp-data-in",
+    "type": "http in",
+    "z": "tab-dsp-data",
+    "name": "GET /api/data/:assetId",
+    "url": "/api/data/:assetId",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-data-verify-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-data-verify-fn",
+    "type": "function",
+    "z": "tab-dsp-data",
+    "name": "verify HMAC signature",
+    "func": "function dspError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.payload = { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\n\nfunction timingSafeEqualStr(a, b) {\n    const bufA = Buffer.from(String(a), 'utf8');\n    const bufB = Buffer.from(String(b), 'utf8');\n    if (bufA.length !== bufB.length) return false;\n    return crypto.timingSafeEqual(bufA, bufB);\n}\n\nconst assetId = msg.req.params.assetId;\nconst q = msg.req.query || {};\nconst token = q.token || '';\nconst expiresAt = q.expiresAt || '';\nconst fromTs = q.from || '';\nconst toTs = q.to || '';\nconst agreementId = q.agreementId || '';\nconst roles = q.roles || '';\n\nconst secret = env.get('DSP_HMAC_SECRET');\nif (!secret) {\n    node.error('dsp-data-verify-fn: DSP_HMAC_SECRET unset');\n    return dspError(503, 'signing_not_configured', ['DSP_HMAC_SECRET is not configured']);\n}\nif (!token || !expiresAt) {\n    return dspError(401, 'invalid_token', ['token and expiresAt query params are required']);\n}\n\nconst path = '/api/data/' + assetId;\nconst encodedAgreementId = encodeURIComponent(agreementId);\nconst encodedRoles = encodeURIComponent(roles);\nconst message = 'GET:' + path + ':' + fromTs + ':' + toTs + ':' + expiresAt + ':' + encodedAgreementId + ':' + encodedRoles;\nconst expected = crypto.createHmac('sha256', Buffer.from(secret, 'utf8')).update(message, 'utf8').digest('hex');\n\nif (!timingSafeEqualStr(token, expected)) {\n    return dspError(401, 'invalid_token', ['HMAC signature does not match']);\n}\n\nconst expiryMs = Date.parse(expiresAt);\nif (!Number.isFinite(expiryMs) || Date.now() > expiryMs) {\n    return dspError(401, 'token_expired', ['signed URL expired at ' + expiresAt]);\n}\n\nmsg._dspDataWindow = { assetId: assetId, from: fromTs, to: toTs, agreementId: agreementId, roles: roles };\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 430,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-data-response"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "dsp-data-response",
+    "type": "http response",
+    "z": "tab-dsp-data",
+    "name": "data response",
+    "statusCode": "",
+    "headers": {},
+    "x": 850,
+    "y": 80,
+    "wires": []
+  }
+]
