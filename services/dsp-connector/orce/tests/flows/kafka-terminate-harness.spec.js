@@ -84,6 +84,25 @@ test('404 still returns with no delete msg', async () => {
     assert.equal(r.result[2], null);
 });
 
+test('terminate an ERROR kafka transfer (topic recorded): 200 TERMINATED + delete msg on output 3', async () => {
+    // Final-review fix: a kafka-streaming transfer whose provisioning errored
+    // AFTER the broker committed the topic lands in ERROR with access.topic set.
+    // ERROR→TERMINATED is now legal so that orphaned topic can be cleaned up.
+    const t = kafkaTransfer('ERROR');
+    const r = await runNode(FLOW, 'dsp-tx-terminate', { msg: { req: { params: { id: t.id } }, res: { _m: 'res' } }, flowCtx: ctxWith(t) });
+    assert.equal(r.result[0].statusCode, 200);
+    assert.equal(r.result[0].payload.state, 'TERMINATED');
+    assert.equal(r.result[2]._kafkaAction, 'delete');
+    assert.equal(r.result[2]._kafkaTopic, t.access.topic);
+});
+
+test('suspend an ERROR transfer still 400s (suspend matrix untouched — pausing an errored transfer makes no sense)', async () => {
+    const t = kafkaTransfer('ERROR');
+    const r = await runNode(FLOW, 'dsp-tx-suspend', { msg: { req: { params: { id: t.id } } }, flowCtx: ctxWith(t) });
+    assert.equal(r.result[0].statusCode, 400);
+    assert.equal(r.result.length, 2, 'suspend has no kafka-delete output');
+});
+
 test('suspend a STARTED kafka transfer: SUSPENDED, topic untouched (2 outputs, no delete)', async () => {
     const t = kafkaTransfer('STARTED');
     const r = await runNode(FLOW, 'dsp-tx-suspend', { msg: { req: { params: { id: t.id } } }, flowCtx: ctxWith(t) });

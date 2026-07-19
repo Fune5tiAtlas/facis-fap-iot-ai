@@ -219,6 +219,11 @@ honestly:
 - **Suspend is state-only** at the data plane (nothing to revoke in-band).
 - **`expiresAt` is advisory** — no reaper deletes expired topics; terminate is
   the cleanup path.
+- **A provisioning failure that occurs after the broker already committed the
+  topic is recoverable** — the resulting `ERROR`-state transfer keeps its
+  `access.topic`, and `ERROR`→`TERMINATED` is now a legal transition, so a
+  `terminate` on it deletes the orphaned topic (previously this was a dead end:
+  the topic existed on the broker with no recorded name and no cleanup path).
 - **Kafka-streaming transfers stay `STARTED`** (never `COMPLETED`) so
   suspend/terminate remain reachable; `facis_dsp_transfer_completions_total`
   counts successful provisioning for this format.

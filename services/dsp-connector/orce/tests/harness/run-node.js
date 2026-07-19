@@ -89,9 +89,16 @@ async function runNode(flowPath, nodeId, opts) {
     const globalCtx = (opts && opts.globalCtx) || new Map();
     const flowCtx = (opts && opts.flowCtx) || new Map();
 
+    // opts.libs lets a test inject a stub for a node's declared lib var
+    // instead of the real module — required for nodes whose libs resolve to
+    // a native/uninstalled dependency (e.g. dsp-tx-kafka-admin's node-rdkafka),
+    // which would otherwise throw at require() time and be untestable here.
+    const libOverride = (opts && opts.libs) || {};
     const libs = {};
     for (const l of node.libs || []) {
-        libs[l.var] = resolveLib(l.module);
+        libs[l.var] = Object.prototype.hasOwnProperty.call(libOverride, l.var)
+            ? libOverride[l.var]
+            : resolveLib(l.module);
     }
 
     const sent = [];
