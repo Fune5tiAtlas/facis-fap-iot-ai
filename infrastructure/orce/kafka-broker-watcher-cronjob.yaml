@@ -12,22 +12,36 @@
 #   - We want the source-of-truth in `kafka.json` to stay aligned for the
 #     next clean redeploy.
 #
+# Two containers, not one — no single small image conveniently bundles kcat
+# with a real HTTP client. Confirmed directly against a live pull:
+# edenhill/kcat has neither curl, nor a POST-capable wget (its busybox wget
+# doesn't support --post-file/--post-data at all), nor python3.
+#   - init container (edenhill/kcat, pinned by digest): runs `kcat -L` and
+#     hands the discovered broker list to the main container via a shared
+#     emptyDir (`/shared/live-brokers.txt`).
+#   - main container (badouralix/curl-jq, pinned by digest — the SAME image
+#     already vetted and pinned for the same reason by
+#     services/dsp-connector/helm/.../orce-flow-deploy-job.yaml): does all
+#     ORCE Admin API + JSON work with curl and jq.
+#
 # Behaviour:
-#   - Every 15 min, the cron pod runs `kcat -L -b $KAFKA_BOOTSTRAP` (the stable
-#     address) to discover current advertised broker NodePorts.
-#   - Compares against the broker list currently deployed in ORCE (fetched via
-#     Admin API).
+#   - Every 15 min: init container discovers current advertised broker
+#     NodePorts; main container compares against the broker list currently
+#     deployed in ORCE (fetched via Admin API).
 #   - If different on TWO consecutive runs (the "stable for 2 cycles" rule —
 #     protects against false positives during a Stackable rolling restart),
-#     the watcher re-renders kafka.json and POSTs it back via the Admin API.
+#     the watcher patches ONLY the `kafka-broker-config` node's `broker`
+#     field and POSTs the merged set back via `Node-RED-Deployment-Type:
+#     nodes` (never `full` — see watch-kafka-brokers.sh's header).
 #   - Always writes structured JSON to stdout for log aggregation.
 #
 # Inputs (cluster-side; not in source control):
 #   - Secret/facis-kafka-certs in `orce` ns (ca.crt + tls.crt + tls.key).
 #   - Secret/facis-orce-admin   in `orce` ns (key `token`).
 #   - ConfigMap/facis-watch-kafka-brokers-script — created from
-#     services/simulation/orce/scripts/watch-kafka-brokers.sh:
+#     services/simulation/orce/scripts/{discover-kafka-brokers.sh,watch-kafka-brokers.sh}:
 #       kubectl create configmap facis-watch-kafka-brokers-script -n orce \
+#         --from-file=discover.sh=services/simulation/orce/scripts/discover-kafka-brokers.sh \
 #         --from-file=watch.sh=services/simulation/orce/scripts/watch-kafka-brokers.sh
 #
 # Apply:
@@ -36,7 +50,8 @@
 # Manual trigger (for testing or after a known restart):
 #   kubectl create job --from=cronjob/kafka-broker-watcher \
 #     kafka-broker-watcher-now -n orce
-#   kubectl logs job/kafka-broker-watcher-now -n orce
+#   kubectl logs job/kafka-broker-watcher-now -n orce -c discover
+#   kubectl logs job/kafka-broker-watcher-now -n orce -c watcher
 #
 # Roll back:
 #   kubectl delete cronjob kafka-broker-watcher -n orce
@@ -68,11 +83,14 @@ spec:
             runAsNonRoot: true
             runAsUser: 1000
             fsGroup: 1000
-          # PVC holds the "previous brokers" memo across runs (1 line of text)
+          # PVC holds the "previous brokers" memo across runs (1 line of text).
+          # `shared` is a same-run-only emptyDir for the init->main handoff.
           volumes:
             - name: state
               persistentVolumeClaim:
                 claimName: kafka-broker-watcher-state
+            - name: shared
+              emptyDir: {}
             - name: kafka-certs
               secret:
                 secretName: facis-kafka-certs
@@ -81,10 +99,52 @@ spec:
               configMap:
                 name: facis-watch-kafka-brokers-script
                 defaultMode: 0555
+          initContainers:
+            - name: discover
+              # edenhill/kcat:1.7.1 is a floating tag — this cluster's node
+              # had an older pull cached with curl present, but a fresh pull
+              # of that same tag came back WITHOUT curl (confirmed directly:
+              # `which curl`/`which python3` return nothing on a fresh pull).
+              # Pinned by digest so an evicted node image cache (node
+              # replacement, GC, autoscale) can never silently change what
+              # this job runs.
+              image: edenhill/kcat@sha256:8f16a5fed099931ce1122420b7473efe467ff9841d53680b99db25dd1723d711
+              command: ["sh", "/scripts/discover.sh"]
+              env:
+                - name: KAFKA_BOOTSTRAP
+                  value: "212.132.83.222:9093"
+                - name: KAFKA_CERT_DIR
+                  value: "/etc/kafka-certs"
+                - name: SHARED_DIR
+                  value: "/shared"
+              volumeMounts:
+                - name: shared
+                  mountPath: /shared
+                - name: kafka-certs
+                  mountPath: /etc/kafka-certs
+                  readOnly: true
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
           containers:
             - name: watcher
-              # edenhill/kcat ships kcat + curl + python3 on alpine.
-              image: edenhill/kcat:1.7.1
+              # badouralix/curl-jq — the same image already used and pinned
+              # by services/dsp-connector/helm/.../orce-flow-deploy-job.yaml
+              # (has both curl and jq, works fine read-only-root-fs). Reused
+              # here rather than re-vetting a second image for the same need.
+              image: badouralix/curl-jq@sha256:e1f1e84c4c23c24d665cd9243dcf7fa531965a0b37b89a64cabca847d834dd62
               command: ["sh", "/scripts/watch.sh"]
               env:
                 - name: ORCE_ADMIN_URL
@@ -96,16 +156,15 @@ spec:
                       key: token
                 - name: KAFKA_BOOTSTRAP
                   value: "212.132.83.222:9093"
-                - name: KAFKA_CERT_DIR
-                  value: "/etc/kafka-certs"
                 - name: STATE_DIR
                   value: "/var/run/watcher-state"
+                - name: SHARED_DIR
+                  value: "/shared"
               volumeMounts:
                 - name: state
                   mountPath: /var/run/watcher-state
-                - name: kafka-certs
-                  mountPath: /etc/kafka-certs
-                  readOnly: true
+                - name: shared
+                  mountPath: /shared
                 - name: script
                   mountPath: /scripts
                   readOnly: true
