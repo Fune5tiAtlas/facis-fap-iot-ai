@@ -190,3 +190,60 @@ helm upgrade facis-dsp-connector . -n orce \
 cd ../../orce/tests
 node e2e/dsp-ingest-e2e.js --env-file .env.cluster
 ```
+
+## NF-3: Kafka Data-Plane Provisioning (FR-DP-002)
+
+`facis-dsp-transfers.json`'s kafka-streaming path is real: `dsp-tx-create`
+builds an honest access object (real stable bootstrap, sanitized single-`tp-`
+topic name, `sasl: null`, an explicit `accessNote`) and routes to the new
+`dsp-tx-kafka-admin` function node, which creates the topic via `node-rdkafka`'s
+`AdminClient` over the connector's own mTLS certs (`/etc/kafka-certs/`) before
+the 202 response is sent. `dsp-tx-terminate` deletes the topic (fire-and-forget
+via the same node); `dsp-tx-suspend` deliberately does not — it is a reversible
+pause. `node-rdkafka` is already on the pod as `node-red-contrib-rdkafka`'s
+dependency (see `infrastructure/orce/init-deps-patch.yaml`); no init-deps change
+is needed.
+
+What's real: topic creation/deletion on the live broker, the bootstrap address,
+the FSM hooks, the no-credential access object. Known limitations, stated
+honestly:
+
+- **No per-topic authorization.** The cluster has no ACL authorizer and is
+  mTLS-only; any certificate the Stackable CA trusts can read any topic.
+  Enabling SASL/SCRAM or ACLs is cluster-side infrastructure requiring
+  client/PMO sign-off — a documented decision-gate item, not built here.
+- **No credential delivery, by design.** Delivering this connector's own key
+  would allow full impersonation across every topic it touches (including
+  internal SFTP/DSP-consumer production traffic). Counterparty mTLS trust is
+  arranged out-of-band with the data space operator.
+- **Suspend is state-only** at the data plane (nothing to revoke in-band).
+- **`expiresAt` is advisory** — no reaper deletes expired topics; terminate is
+  the cleanup path.
+- **Kafka-streaming transfers stay `STARTED`** (never `COMPLETED`) so
+  suspend/terminate remain reachable; `facis_dsp_transfer_completions_total`
+  counts successful provisioning for this format.
+- `dsp-tx-kafka-admin` itself is not unit-testable (native `node-rdkafka` +
+  live broker); the pure logic around it is harness-tested
+  (`kafka-access-harness.spec.js`, `kafka-terminate-harness.spec.js`) and the
+  AdminClient behavior is verified by `tests/e2e/dsp-kafka-transfer-e2e.js`.
+
+### Live verification (requires live cluster access — not automated)
+
+```bash
+export KUBECONFIG=/Users/danielpires/Developer/Ciberseg/Atlas/k8s/K8s-cluster-IONOS-cloud.yaml
+
+# 1. Deploy the updated flows + the fixed DSP_KAFKA_BOOTSTRAP default
+cd services/dsp-connector/helm/facis-dsp-connector
+helm upgrade facis-dsp-connector . -n orce \
+  --set dsp.trino.password=<the live trino-users password>
+
+# 2. Confirm the pod sees the new bootstrap and has node-rdkafka
+kubectl exec -n orce deploy/orce -- env | grep DSP_KAFKA_BOOTSTRAP
+kubectl exec -n orce deploy/orce -- ls /data/node_modules/node-rdkafka/lib/admin.js
+
+# 3. Put the mTLS PEMs where the E2E script expects them (from
+#    `Credentials and configs/credentials.txt`) and run it
+mkdir -p /tmp/facis-kafka-certs   # ca.crt, tls.crt, tls.key
+cd ../../orce/tests
+node e2e/dsp-kafka-transfer-e2e.js --env-file .env.cluster
+```

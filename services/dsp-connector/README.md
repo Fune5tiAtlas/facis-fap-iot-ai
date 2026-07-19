@@ -25,7 +25,7 @@ Consumer ──> [DSP Connector (ORCE)] ──> Signed URL ──> [AI Insight S
 
 **Transfer formats:**
 - **HTTP Pull**: HMAC-SHA256 signed URLs with time-windowed access
-- **Kafka Streaming**: SCRAM-SHA-256 authenticated topic access (stub)
+- **Kafka Streaming**: real per-transfer topic provisioning on the FACIS Kafka cluster (mTLS-only — no credentials delivered in-band; see "Kafka Streaming Transfer Format" below)
 
 ## Configuration
 
@@ -39,7 +39,7 @@ Rendered into the ORCE pod's environment by the Helm chart's Secret
 | `DSP_HMAC_SECRET` | — | **Yes** | Hex-encoded HMAC secret for signed URLs |
 | `DSP_DATA_API_BASE_URL` | `https://ai-insight.facis.cloud` | No | Base URL for data access endpoints |
 | `DSP_DEFAULT_TTL_SECONDS` | `3600` | No | Default signed URL validity period |
-| `DSP_KAFKA_BOOTSTRAP` | — | No | Kafka bootstrap servers (for kafka-streaming format) |
+| `DSP_KAFKA_BOOTSTRAP` | `212.132.83.222:9093` | No | Kafka bootstrap (kafka-streaming topic creation + access objects) |
 | `DSP_IAM_ENFORCE` | `warn` | No | IAM verification mode: `off` (pre-NF-1 parity), `warn` (log violations), `enforce` (reject) |
 | `DSP_VP_AUDIENCE` | `did:web:fap-iotai.facis.cloud` | No | This connector's did:web identity for VP audience claim validation |
 | `DSP_TRUSTED_ISSUERS` | — | No | Comma-separated allowlist of trusted VC-issuer DIDs |
@@ -119,9 +119,37 @@ TERMINATED   SUSPENDED ──> STARTED
   ERROR      TERMINATED
 ```
 
-On `COMPLETED`, an `AccessObject` is provisioned with either:
-- A signed pull URL (HTTP Pull format)
-- Kafka connection parameters (Kafka Streaming format)
+`http-pull` transfers auto-complete (`REQUESTED → STARTED → COMPLETED`) and attach
+an `AccessObject` with a signed pull URL. `kafka-streaming` transfers stop at
+`STARTED` (NF-3): a stream has no natural end, and `COMPLETED` is terminal —
+parking a live stream there would make suspend/terminate unreachable and orphan
+its topic. The `AccessObject` attaches once the topic genuinely exists on the
+broker; on provisioning failure the transfer lands in `ERROR` with a `reason`.
+
+## Kafka Streaming Transfer Format (NF-3)
+
+`POST /dsp/transfers` with `format: "kafka-streaming"` creates a **real** Kafka
+topic on the FACIS Stackable cluster via `node-rdkafka`'s `AdminClient`, using
+the connector's own mTLS client certificate (`/etc/kafka-certs/`) — the same
+identity every producer/consumer flow on the shared ORCE pod already uses.
+
+- **Topic**: `iot.dataset.<assetId sanitized to [a-zA-Z0-9._-]>.<transferId>`
+  (e.g. `iot.dataset.dataset-facis-net-grid-hourly.tp-1a2b3c4d5e6f`), 1
+  partition, replication factor 1. Sanitization is required — `:` is illegal
+  in Kafka topic names. The pre-NF-3 stub's doubled `tp-tp-` prefix is fixed.
+- **Access object**: `{ bootstrap, topic, sasl: null, accessNote, expiresAt }`.
+  `bootstrap` defaults to the cluster's stable bootstrap `212.132.83.222:9093`.
+  **No credential material is ever delivered.** The cluster is mTLS-only (SASL
+  is deliberately absent from the toolchain), and shipping the connector's own
+  private key would let any recipient impersonate the connector on every topic
+  it touches — so `accessNote` states: "Connecting to this topic requires an
+  mTLS client certificate trusted by the FACIS Kafka cluster, arranged
+  out-of-band with the data space operator. This API does not deliver
+  connection credentials." `expiresAt` is advisory (no reaper).
+- **Terminate** deletes the topic on the broker. **Suspend** keeps it —
+  suspend is a reversible pause (`SUSPENDED → STARTED` is legal); note that
+  without in-band credentials suspension is state-only and cannot revoke a
+  counterparty's out-of-band mTLS trust at the data plane.
 
 ## HMAC Signed URL Format
 
