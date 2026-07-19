@@ -134,6 +134,48 @@
     "y": 80,
     "wires": [
       [
+        "dsp-consumer-iam-call"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-consumer-iam-call",
+    "type": "link call",
+    "z": "tab-dsp-consumer",
+    "name": "iam.verify",
+    "links": [
+      "dsp-iam-verify-in"
+    ],
+    "timeout": "5",
+    "x": 170,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-consumer-iam-branch"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-consumer-iam-branch",
+    "type": "switch",
+    "z": "tab-dsp-consumer",
+    "name": "iamRejected?",
+    "property": "iamRejected",
+    "propertyType": "msg",
+    "rules": [
+      { "t": "true" },
+      { "t": "false" }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 210,
+    "y": 80,
+    "wires": [
+      [
+        "dsp-consumer-response"
+      ],
+      [
         "dsp-consumer-prep-transfer-fn"
       ]
     ]

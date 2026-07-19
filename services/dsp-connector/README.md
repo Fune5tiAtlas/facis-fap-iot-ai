@@ -138,12 +138,17 @@ before being concatenated into the message -- not just the URL -- so an unencode
 inside either field can't make two different `(agreementId, roles)` pairs collide on
 the same signed message. Encoded with `encodeURIComponent`.
 
-The signed URL targets `{baseUrl}/api/data/{assetId}` on **ai-insight-service**
-specifically, and includes `from`, `to`, `expiresAt`, `agreementId`, `roles`, and
-`token` query parameters. ai-insight-service verifies the token there and enforces
-`PolicyEnforcer` using these HMAC-verified `agreementId`/`roles` claims -- see
-[ai-insight-service's configuration guide](../ai-insight-service/docs/guides/configuration.md#policy-and-rate-limiting)
-for the policy implications.
+The signed URL targets `{baseUrl}/api/data/{assetId}`, and includes `from`, `to`,
+`expiresAt`, `agreementId`, `roles`, and `token` query parameters. This endpoint is
+served by the ORCE flow (`orce/flows/facis-dsp-data.json`'s `dsp-data-verify-fn`
+node), not by ai-insight-service -- the old Python route at the same path
+(`services/ai-insight-service/src/api/rest/routes/dsp.py`) is dead code (see
+`orce/README.md`'s NF-2 section). `dsp-data-verify-fn` reconstructs the HMAC from
+the request's query params and rejects on mismatch or expiry; there is no
+PolicyEnforcer-equivalent check beyond that -- `agreementId`/`roles` are bound into
+the signature itself (so a signed URL can't be replayed against a different
+agreement or role set) rather than being separately re-checked against a policy
+engine.
 
 ## Testing
 

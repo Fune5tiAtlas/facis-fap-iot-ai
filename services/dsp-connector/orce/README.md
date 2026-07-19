@@ -120,6 +120,17 @@ outbound calls to the provider — both are known, explicitly scoped-out
 follow-ups (`DSP_IAM_ENFORCE=warn` in the live deployment does not require
 one today).
 
+**Topic creation assumption**: `--add-topic` only provisions the NiFi
+consumer flow for `dsp.ingest.raw`; nothing in this plan creates the Kafka
+topic itself. As with the existing `sftp.ingest.raw` topic (the sibling
+`sftp-ingestion-service`'s Bronze topic, also never explicitly provisioned
+anywhere in this repo), `dsp.ingest.raw` is expected to auto-create on
+first produce — if the live broker has `auto.create.topics.enable`
+disabled (the production recommendation per
+`services/simulation/docs/deployment/infrastructure-prerequisites.md`
+§3.2, which the 9 `sim.*` topics follow but `sftp.ingest.raw` does not),
+pre-create it manually before running `--add-topic`.
+
 `provisionHttpPull()`'s signed URLs include a literal `+` in `expiresAt`
 (e.g. `...123000+00:00`), unescaped in the query string. Verified against
 this stack's actual Express version (4.22.1, pinned via the `qs`

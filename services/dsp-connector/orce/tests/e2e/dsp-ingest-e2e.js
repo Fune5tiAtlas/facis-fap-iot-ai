@@ -69,15 +69,22 @@ async function main() {
 
     console.log('1. Negotiating agreement for', assetId);
     const neg = await req('POST', baseUrl + '/dsp/negotiations', { counterparty: 'did:web:fap-iotai.facis.cloud', offerId: assetId.replace('dataset:', 'offer:') + ':read' });
-    if (neg.statusCode >= 300 || !neg.body.agreementId) throw new Error('negotiation failed: ' + JSON.stringify(neg.body));
-    console.log('   agreementId =', neg.body.agreementId);
+    if (neg.statusCode >= 300 || !neg.body.negotiationId) throw new Error('negotiation failed: ' + JSON.stringify(neg.body));
+    console.log('   negotiation created, negotiationId =', neg.body.negotiationId);
+
+    // POST /dsp/negotiations auto-finalises server-side but only returns
+    // {negotiationId} (see dsp-neg-create in facis-dsp-negotiations.json);
+    // the agreementId is only available via a follow-up GET.
+    const negGet = await req('GET', baseUrl + '/dsp/negotiations/' + neg.body.negotiationId);
+    if (negGet.statusCode >= 300 || !negGet.body.agreementId) throw new Error('negotiation lookup failed: ' + JSON.stringify(negGet.body));
+    console.log('   agreement finalized, agreementId =', negGet.body.agreementId);
 
     console.log('2. Checking bronze.dsp_ingest row count before ingest');
     const before = await trinoRowCount(trinoUrl, catalog, trinoUser, trinoPassword);
     console.log('   before =', before);
 
     console.log('3. POST /dsp/ingest');
-    const ingest = await req('POST', baseUrl + '/dsp/ingest', { providerBaseUrl: baseUrl, assetId, agreementId: neg.body.agreementId });
+    const ingest = await req('POST', baseUrl + '/dsp/ingest', { providerBaseUrl: baseUrl, assetId, agreementId: negGet.body.agreementId });
     if (ingest.statusCode !== 202) throw new Error('ingest failed: ' + JSON.stringify(ingest.body));
     console.log('   accepted, rowCount =', ingest.body.rowCount);
 

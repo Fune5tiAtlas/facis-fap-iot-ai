@@ -15,7 +15,8 @@
       "dsp-neg-iam-call",
       "dsp-tx-iam-call",
       "dsp-tx-list-iam-call",
-      "dsp-cat-iam-call"
+      "dsp-cat-iam-call",
+      "dsp-consumer-iam-call"
     ],
     "x": 150,
     "y": 120,
