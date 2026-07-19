@@ -74,6 +74,23 @@ test('verify: signature is bound to assetId — same query against a different a
     assert.equal(r.result[0].payload['dspace:code'], 'invalid_token');
 });
 
+test('verify: expiresAt containing a literal + still verifies after Express/qs decodes it to a space (regression, see README NF-2 section)', async () => {
+    const assetId = 'dataset:facis:net-grid-hourly';
+    // A real signed expiresAt has a literal '+' in its UTC offset suffix
+    // (e.g. provisionHttpPull()'s output), unescaped in the query string.
+    // Express's default 'extended' (qs) query parser decodes an unescaped
+    // '+' in a raw query string to a space before this function node ever
+    // sees it — simulate that here by signing against the real '+' value,
+    // then handing the function the space-decoded form, exactly like
+    // msg.req.query would actually contain.
+    const realExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString().replace('Z', '+00:00');
+    const spaceDecodedExpiresAt = realExpiresAt.replace('+', ' ');
+    const token = sign(assetId, '', '', realExpiresAt, '', '');
+    const r = await runVerify({ token, expiresAt: spaceDecodedExpiresAt, from: '', to: '', agreementId: '', roles: '' }, assetId);
+    assert.equal(r.result[0], null);
+    assert.equal(r.result[1]._dspDataWindow.assetId, assetId);
+});
+
 test('verify: missing DSP_HMAC_SECRET → 503 signing_not_configured', async () => {
     const r = await runNode(DATA_FLOW, 'dsp-data-verify-fn', {
         env: {},

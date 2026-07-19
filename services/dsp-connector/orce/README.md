@@ -120,14 +120,25 @@ outbound calls to the provider — both are known, explicitly scoped-out
 follow-ups (`DSP_IAM_ENFORCE=warn` in the live deployment does not require
 one today).
 
-Known open item, not fixed as part of this work: `provisionHttpPull()`'s
-signed URLs include a literal `+` in `expiresAt` (e.g. `...123000+00:00`),
-unescaped in the query string. Whether this round-trips correctly through
-a given HTTP client/server's query-string parser (some treat `+` as a
-literal, some as a space) was not exhaustively verified against every
-client this endpoint might see — `tests/e2e/dsp-ingest-e2e.js` exercises
-the real path end-to-end and will fail loudly (signature mismatch) if it
-doesn't for the specific client/server pair it uses.
+`provisionHttpPull()`'s signed URLs include a literal `+` in `expiresAt`
+(e.g. `...123000+00:00`), unescaped in the query string. Verified against
+this stack's actual Express version (4.22.1, pinned via the `qs`
+dependency also present in `services/simulation/orce/node_modules`, which
+Node-RED's `http in` node's underlying Express app uses for `req.query` in
+its default `extended` mode): an unescaped `+` **does** decode to a space
+by the time `dsp-data-verify-fn` reads it off `msg.req.query.expiresAt`
+(confirmed with a real `express()` app hitting `req.query`, not just
+`qs.parse()` in isolation — same `application/x-www-form-urlencoded`
+convention as Node's own `querystring`/`URLSearchParams`). `dsp-data-verify-fn`
+now normalizes `expiresAt`/`from`/`to` back from space to `+` immediately
+after reading `msg.req.query`, before HMAC reconstruction — see its
+`unspacePlus()` helper. Remaining, narrower risk: a client that presents
+the provider-issued pull URL to `GET /api/data/:assetId` via something
+other than Node-RED/Express's own decoding (e.g. re-parses the URL through
+a library that leaves a literal `+` alone, or double-decodes it) would
+still see a signature mismatch — `tests/e2e/dsp-ingest-e2e.js` exercises
+the real path end-to-end and will fail loudly (signature mismatch) if that
+happens for the specific client/server pair it uses.
 
 **Kafka broker config caveat**: the consumer flow's `rdkafka out` node
 reuses `${SFTP_KAFKA_BROKERS}`, an env var rendered by the *sibling*

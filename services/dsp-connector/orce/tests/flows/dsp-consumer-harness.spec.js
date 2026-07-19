@@ -32,6 +32,15 @@ test('prep-transfer: missing agreementId → 422 invalid_request', async () => {
     assert.equal(r.result[1], null);
 });
 
+test('prep-transfer: error path preserves msg.res (regression: dspError used to build a fresh object, dropping the http-in response handle)', async () => {
+    const resMarker = { _marker: 'test-res-handle' };
+    const r = await runNode(CONSUMER_FLOW, 'dsp-consumer-prep-transfer-fn', {
+        msg: { res: resMarker, payload: { providerBaseUrl: 'https://x', assetId: 'a' } }
+    });
+    assert.equal(r.result[0].statusCode, 422);
+    assert.equal(r.result[0].res._marker, 'test-res-handle');
+});
+
 // ---- dsp-consumer-prep-get-transfer-fn ----
 
 test('prep-get-transfer: valid create-response builds the GET request', async () => {
@@ -51,6 +60,15 @@ test('prep-get-transfer: provider returned an error (senderr:false string payloa
     assert.equal(r.result[0].statusCode, 502);
     assert.equal(r.result[0].payload['dspace:code'], 'provider_transfer_create_failed');
     assert.equal(r.result[1], null);
+});
+
+test('prep-get-transfer: error path preserves msg.res (regression: dspError used to build a fresh object)', async () => {
+    const resMarker = { _marker: 'test-res-handle' };
+    const r = await runNode(CONSUMER_FLOW, 'dsp-consumer-prep-get-transfer-fn', {
+        msg: { res: resMarker, statusCode: 'ENOTFOUND', payload: 'getaddrinfo ENOTFOUND p.example', _dspConsumer: { providerBaseUrl: 'https://p.example' } }
+    });
+    assert.equal(r.result[0].statusCode, 502);
+    assert.equal(r.result[0].res._marker, 'test-res-handle');
 });
 
 // ---- dsp-consumer-extract-access-fn ----
@@ -78,6 +96,15 @@ test('extract-access: COMPLETED but kafka-streaming format (no access.url) → 5
     });
     assert.equal(r.result[0].statusCode, 502);
     assert.equal(r.result[0].payload['dspace:code'], 'provider_access_object_missing');
+});
+
+test('extract-access: error path preserves msg.res (regression: dspError used to build a fresh object)', async () => {
+    const resMarker = { _marker: 'test-res-handle' };
+    const r = await runNode(CONSUMER_FLOW, 'dsp-consumer-extract-access-fn', {
+        msg: { res: resMarker, payload: { state: 'STARTED' } }
+    });
+    assert.equal(r.result[0].statusCode, 502);
+    assert.equal(r.result[0].res._marker, 'test-res-handle');
 });
 
 // ---- dsp-consumer-prep-envelope-meta-fn ----
@@ -108,6 +135,24 @@ test('prep-envelope-meta: malformed payload (no rows array) → 502 provider_dat
     });
     assert.equal(r.result[0].statusCode, 502);
     assert.equal(r.result[0].payload['dspace:code'], 'provider_data_pull_failed');
+});
+
+test('prep-envelope-meta: error path preserves msg.res (regression: dspError used to build a fresh object)', async () => {
+    const resMarker = { _marker: 'test-res-handle' };
+    const r = await runNode(CONSUMER_FLOW, 'dsp-consumer-prep-envelope-meta-fn', {
+        msg: { res: resMarker, payload: 'not json', statusCode: 401, _dspConsumer: {} }
+    });
+    assert.equal(r.result[0].statusCode, 502);
+    assert.equal(r.result[0].res._marker, 'test-res-handle');
+});
+
+test('prep-envelope-meta: success path (202 accepted) preserves msg.res (regression: respMsg used to be a fresh object, dropping the response handle on the ONE success path a real caller sees)', async () => {
+    const resMarker = { _marker: 'test-res-handle' };
+    const r = await runNode(CONSUMER_FLOW, 'dsp-consumer-prep-envelope-meta-fn', {
+        msg: { res: resMarker, payload: { rows: [{ hour: 'a' }] }, _dspConsumer: { transferId: 'tp-1', assetId: 'dataset:facis:x', providerBaseUrl: 'https://p.example' } }
+    });
+    assert.equal(r.result[1].statusCode, 202);
+    assert.equal(r.result[1].res._marker, 'test-res-handle');
 });
 
 // ---- dsp-consumer-build-envelope-fn ----
