@@ -306,8 +306,8 @@
     "type": "function",
     "z": "tab-dsp-transfers",
     "name": "transition → TERMINATED",
-    "func": "const VALID = {\n    REQUESTED: new Set(['STARTED','TERMINATED','ERROR']),\n    STARTED:   new Set(['COMPLETED','SUSPENDED','TERMINATED','ERROR']),\n    SUSPENDED: new Set(['STARTED','TERMINATED']),\n    COMPLETED: new Set(),\n    TERMINATED: new Set(),\n    ERROR:     new Set()\n};\nconst id = msg.req.params.id;\nconst transfers = flow.get('transfers') || {};\nconst cur = transfers[id];\nif (!cur) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Transfer ' + id + ' not found' };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst target = 'TERMINATED';\nconst allowed = VALID[cur.state] || new Set();\nif (!allowed.has(target)) {\n    msg.statusCode = 400;\n    msg.payload = { detail: 'Invalid transition: ' + cur.state + ' \\u2192 ' + target +\n                            '. Valid targets: ' + (Array.from(allowed).join(',') || '(terminal)') };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst now = new Date().toISOString().slice(0, -1) + '000+00:00';\nconst updated = Object.assign({}, cur, { state: target, reason: 'Terminated by consumer', updatedAt: now });\ntransfers[id] = updated;\nflow.set('transfers', transfers);\nmsg.statusCode = 200;\nmsg.payload = updated;\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn [msg, { payload: '' }];\n",
-    "outputs": 2,
+    "func": "const VALID = {\n    REQUESTED: new Set(['STARTED','TERMINATED','ERROR']),\n    STARTED:   new Set(['COMPLETED','SUSPENDED','TERMINATED','ERROR']),\n    SUSPENDED: new Set(['STARTED','TERMINATED']),\n    COMPLETED: new Set(),\n    TERMINATED: new Set(),\n    ERROR:     new Set()\n};\nconst id = msg.req.params.id;\nconst transfers = flow.get('transfers') || {};\nconst cur = transfers[id];\nif (!cur) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Transfer ' + id + ' not found' };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null, null];\n}\nconst target = 'TERMINATED';\nconst allowed = VALID[cur.state] || new Set();\nif (!allowed.has(target)) {\n    msg.statusCode = 400;\n    msg.payload = { detail: 'Invalid transition: ' + cur.state + ' \\u2192 ' + target +\n                            '. Valid targets: ' + (Array.from(allowed).join(',') || '(terminal)') };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null, null];\n}\nconst now = new Date().toISOString().slice(0, -1) + '000+00:00';\nconst updated = Object.assign({}, cur, { state: target, reason: 'Terminated by consumer', updatedAt: now });\ntransfers[id] = updated;\nflow.set('transfers', transfers);\nmsg.statusCode = 200;\nmsg.payload = updated;\nmsg.headers = { 'Content-Type': 'application/json' };\n// NF-3: a kafka-streaming transfer's topic is deleted on terminate \\u2014 the only\n// irreversible consumer-triggered exit. Suspend (reversible: SUSPENDED\\u2192STARTED\n// is legal) deliberately keeps the topic; see the tab info + orce/README.md.\n// Fresh minimal object, NOT msg: the delete path must never carry req/res.\nlet kafkaDelete = null;\nif (updated.format === 'kafka-streaming' && updated.access && updated.access.topic) {\n    kafkaDelete = { _kafkaAction: 'delete', _kafkaTopic: updated.access.topic, payload: '' };\n}\nreturn [msg, { payload: '' }, kafkaDelete];\n",
+    "outputs": 3,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
@@ -321,6 +321,9 @@
       ],
       [
         "dsp-tx-link-out-persist"
+      ],
+      [
+        "dsp-tx-kafka-admin"
       ]
     ]
   },
