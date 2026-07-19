@@ -57,9 +57,15 @@ dsp:
   dataApiBaseUrl: https://fap-iotai.facis.cloud
   # -- Default TTL for signed URLs and Kafka access tokens (seconds)
   defaultTtlSeconds: 3600
-  # -- Kafka bootstrap servers used in Kafka-streaming access objects.
-  #    Connection params only — DSP does not produce data to this Kafka.
-  kafkaBootstrap: kafka.provider.example:9092
+  # -- Kafka bootstrap for kafka-streaming transfers (NF-3): dsp-tx-kafka-admin
+  #    creates/deletes per-transfer topics here via mTLS AdminClient, and the
+  #    value is echoed in access objects. This is the Stackable cluster's
+  #    STABLE bootstrap address — broker NodePorts drift on restart, the
+  #    bootstrap does not (same reason facis-simulation-kafka.json leads its
+  #    broker list with it). Was kafka.provider.example:9092, a fictitious
+  #    host from the pre-NF-3 stub — same category of fix as dataApiBaseUrl
+  #    above (daa5f98).
+  kafkaBootstrap: 212.132.83.222:9093
   # -- NF-1 Identity & Trust (IAM verifier)
   iam:
     # -- off | warn | enforce. Start new environments at "warn" to observe
