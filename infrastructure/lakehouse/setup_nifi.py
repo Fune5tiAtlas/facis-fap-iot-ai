@@ -429,13 +429,16 @@ def add_topic(nifi_url: str, token: str, catalog: str, topic: str, dry_run: bool
     pg_id = pg["id"]
 
     kafka_svc_id = client.get_controller_service_id(pg_id, "FACIS Kafka Connection")
-    jdbc_svc_id = client.get_controller_service_id(root_id, TRINO_JDBC_POOL_NAME)
+    # The JDBC pool is scoped to the ingestion process group (where the
+    # PutSQL processors that reference it live), not to the root group —
+    # look it up there, falling back to root for older deployments.
+    jdbc_svc_id = client.get_controller_service_id(pg_id, TRINO_JDBC_POOL_NAME) or client.get_controller_service_id(root_id, TRINO_JDBC_POOL_NAME)
     if not kafka_svc_id:
         logger.error("Could not find the existing Kafka controller service in the process group — aborting rather than creating duplicates.")
         sys.exit(1)
     if not jdbc_svc_id:
         logger.error(
-            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found at root — "
+            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found in the ingestion process group or at root — "
             "provision it first (provision_nifi_jdbc.sh / restore-trino-jdbc-pool.sh)."
         )
         sys.exit(1)
@@ -521,7 +524,7 @@ def setup_nifi(
     jdbc_svc_id = client.get_controller_service_id(root_id, TRINO_JDBC_POOL_NAME)
     if not jdbc_svc_id:
         logger.error(
-            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found at root — "
+            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found in the ingestion process group or at root — "
             "provision it first (provision_nifi_jdbc.sh / restore-trino-jdbc-pool.sh)."
         )
         sys.exit(1)
