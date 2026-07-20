@@ -204,37 +204,73 @@ spec:
               const fs = require('fs');
               const path = '/mnt/orce-data/settings.js';
               const IAM_MARKER = 'FACIS:iam-verify-patch';
+              const TOKEN_MARKER = 'FACIS:admin-token';
               let src = fs.readFileSync(path, 'utf8');
-              if (src.includes(IAM_MARKER)) {
+              let changed = false;
+              if (!src.includes(IAM_MARKER)) {
+                // Enable functionExternalModules so function nodes can declare
+                // libs: [{var:'jose', module:'jose'}] etc. Off by default in
+                // Node-RED; required by the DSP IAM verify flow.
+                const feBefore = /functionExternalModules\s*:\s*false/;
+                const feAfter = "functionExternalModules: true, // FACIS:iam-verify-patch";
+                if (feBefore.test(src)) {
+                  src = src.replace(feBefore, feAfter);
+                } else if (!/functionExternalModules\s*:/.test(src)) {
+                  // Setting absent entirely (it defaults off and is often omitted
+                  // from settings.js templates). Inject before module.exports's
+                  // closing `};` — the LAST top-level `};` in the file so a
+                  // commented-out `};` earlier does not trip us.
+                  const re = /^\s*\};\s*$/gm;
+                  let lastBraceIdx = -1;
+                  let m;
+                  while ((m = re.exec(src)) !== null) lastBraceIdx = m.index;
+                  if (lastBraceIdx === -1) {
+                    console.error('[init-settings] FAIL: closing `};` not found');
+                    process.exit(1);
+                  }
+                  const inject = '\n    functionExternalModules: true, // FACIS:iam-verify-patch\n';
+                  src = src.slice(0, lastBraceIdx) + inject + src.slice(lastBraceIdx);
+                } else {
+                  // Present and already true (or another literal) — just stamp
+                  // the marker so this container is idempotent on next boot.
+                  src = src.replace(/(functionExternalModules\s*:\s*true)/, '$1 /* FACIS:iam-verify-patch */');
+                }
+                changed = true;
+              }
+              if (!src.includes(TOKEN_MARKER)) {
+                // The image's default settings.js gates the Admin API with
+                // credentials-type adminAuth ONLY (username/password sessions);
+                // it does NOT honor ORCE_ADMIN_TOKEN as a bearer token. Add a
+                // static-token resolver (Node-RED's supported adminAuth.tokens
+                // hook) so the flow-deploy Job and operators can authenticate
+                // with the Secret-held token without a session-minting step.
+                const i = src.indexOf('adminAuth: {');
+                if (i < 0) {
+                  console.error('[init-settings] WARN: adminAuth block not found; token patch skipped');
+                } else {
+                  const j = src.indexOf('}]', i);
+                  if (j < 0) {
+                    console.error('[init-settings] WARN: adminAuth users array close not found; token patch skipped');
+                  } else {
+                    const ins = '}],\n'
+                      + '        // FACIS:admin-token — accept the static deploy token from the\n'
+                      + '        // ORCE_ADMIN_TOKEN env var (Secret-mounted) as an Admin API\n'
+                      + '        // bearer token.\n'
+                      + '        tokens: function (token) {\n'
+                      + '            return new Promise(function (resolve) {\n'
+                      + '                var t = process.env.ORCE_ADMIN_TOKEN;\n'
+                      + '                if (t && token === t.trim()) { resolve({ username: "admin", permissions: "*" }); }\n'
+                      + '                else { resolve(null); }\n'
+                      + '            });\n'
+                      + '        }';
+                    src = src.slice(0, j) + ins + src.slice(j + 2);
+                    changed = true;
+                  }
+                }
+              }
+              if (!changed) {
                 console.log('[init-settings] already applied');
                 process.exit(0);
-              }
-              // Enable functionExternalModules so function nodes can declare
-              // libs: [{var:'jose', module:'jose'}] etc. Off by default in
-              // Node-RED; required by the DSP IAM verify flow.
-              const feBefore = /functionExternalModules\s*:\s*false/;
-              const feAfter = "functionExternalModules: true, // FACIS:iam-verify-patch";
-              if (feBefore.test(src)) {
-                src = src.replace(feBefore, feAfter);
-              } else if (!/functionExternalModules\s*:/.test(src)) {
-                // Setting absent entirely (it defaults off and is often omitted
-                // from settings.js templates). Inject before module.exports's
-                // closing `};` — the LAST top-level `};` in the file so a
-                // commented-out `};` earlier does not trip us.
-                const re = /^\s*\};\s*$/gm;
-                let lastBraceIdx = -1;
-                let m;
-                while ((m = re.exec(src)) !== null) lastBraceIdx = m.index;
-                if (lastBraceIdx === -1) {
-                  console.error('[init-settings] FAIL: closing `};` not found');
-                  process.exit(1);
-                }
-                const inject = '\n    functionExternalModules: true, // FACIS:iam-verify-patch\n';
-                src = src.slice(0, lastBraceIdx) + inject + src.slice(lastBraceIdx);
-              } else {
-                // Present and already true (or another literal) — just stamp
-                // the marker so this container is idempotent on next boot.
-                src = src.replace(/(functionExternalModules\s*:\s*true)/, '$1 /* FACIS:iam-verify-patch */');
               }
               // Atomic write so a half-written file never reaches Node-RED.
               const tmp = path + '.new';
