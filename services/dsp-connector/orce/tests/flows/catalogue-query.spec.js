@@ -46,14 +46,14 @@ function queryCatalogue(body, datasets = DATASETS) {
 test('empty filter returns all datasets in source order', () => {
     const r = queryCatalogue({});
     assert.equal(r.datasets.length, DATASETS.length);
-    assert.equal(r.datasets.length, 6);    // FACIS_DATASETS has 6 entries
+    assert.equal(r.datasets.length, 8);    // FACIS_DATASETS has 8 entries
     assert.equal(r.nextCursor, null);
 });
 
-test('filter.assetType=iot.timeseries returns 5 of 6 datasets', () => {
+test('filter.assetType=iot.timeseries returns 7 of 8 datasets', () => {
     const r = queryCatalogue({ filter: { assetType: 'iot.timeseries' } });
     assert.ok(r.datasets.every(d => d.metadata.assetType === 'iot.timeseries'));
-    assert.equal(r.datasets.length, 5);
+    assert.equal(r.datasets.length, 7);
 });
 
 test('filter.assetType=iot.analytics matches only anomaly-candidates', () => {
@@ -76,22 +76,22 @@ test('limit + cursor pagination produces nextCursor for first page', () => {
 
 test('limit + cursor pagination ends with null nextCursor', () => {
     const r = queryCatalogue({ page: { limit: 50, cursor: '4' } });
-    assert.equal(r.datasets.length, 2);   // 4..5 of a 6-item list
+    assert.equal(r.datasets.length, 4);   // 4..7 of an 8-item list
     assert.equal(r.nextCursor, null);
 });
 
 test('non-numeric cursor falls back to start=0 (matches Python int(c) ValueError handler)', () => {
     const r = queryCatalogue({ page: { limit: 3, cursor: 'not-a-number' } });
     assert.equal(r.datasets.length, 3);
-    // first 3 of 6 → next page exists → nextCursor='3'
+    // first 3 of 8 → next page exists → nextCursor='3'
     assert.equal(r.nextCursor, '3');
 });
 
 test('null cursor + missing limit defaults to limit=50', () => {
     const r = queryCatalogue({ page: { cursor: null } });
-    // 6 items, limit=50 → no nextCursor
+    // 8 items, limit=50 → no nextCursor
     assert.equal(r.nextCursor, null);
-    assert.equal(r.datasets.length, 6);
+    assert.equal(r.datasets.length, 8);
 });
 
 test('combining filters: assetType=iot.timeseries + datasetIds=[1]', () => {
