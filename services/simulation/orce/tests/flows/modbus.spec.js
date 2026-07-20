@@ -69,8 +69,8 @@ function buildWrites(meter) {
     for (const [addr, value] of map) {
         if (typeof value !== 'number' || Number.isNaN(value)) continue;
         const [high, low] = float32ToRegisters(value);
-        writes.push({ payload: { value: high, register: addr, fc: 'FC6' } });
-        writes.push({ payload: { value: low, register: addr + 1, fc: 'FC6' } });
+        writes.push({ payload: { value: high, register: 'holding', address: addr } });
+        writes.push({ payload: { value: low, register: 'holding', address: addr + 1 } });
     }
     return writes;
 }
@@ -98,11 +98,12 @@ test('modbus: 13 register pairs (26 writes) per meter', () => {
     assert.equal(writes.length, 26);
 });
 
-test('modbus: each write has FC6, register address, and 16-bit value', () => {
+test('modbus: each write targets the holding buffer with a 16-bit value', () => {
     const writes = buildWrites(SAMPLE_METER);
     for (const w of writes) {
-        assert.equal(w.payload.fc, 'FC6');
-        assert.ok(Number.isInteger(w.payload.register));
+        // modbus-server input contract: { value, register: 'holding', address }
+        assert.equal(w.payload.register, 'holding');
+        assert.ok(Number.isInteger(w.payload.address));
         assert.ok(w.payload.value >= 0 && w.payload.value <= 0xffff);
     }
 });
@@ -110,8 +111,8 @@ test('modbus: each write has FC6, register address, and 16-bit value', () => {
 test('modbus: round-trip preserves float32 values within precision', () => {
     const writes = buildWrites(SAMPLE_METER);
     function pairFor(addr) {
-        const high = writes.find((w) => w.payload.register === addr).payload.value;
-        const low = writes.find((w) => w.payload.register === addr + 1).payload.value;
+        const high = writes.find((w) => w.payload.address === addr).payload.value;
+        const low = writes.find((w) => w.payload.address === addr + 1).payload.value;
         return registersToFloat32(high, low);
     }
     const f32 = (v) => Math.fround(v);
@@ -123,8 +124,8 @@ test('modbus: round-trip preserves float32 values within precision', () => {
 
 test('modbus: total active power = L1 + L2 + L3', () => {
     const writes = buildWrites(SAMPLE_METER);
-    const high = writes.find((w) => w.payload.register === 19006).payload.value;
-    const low = writes.find((w) => w.payload.register === 19007).payload.value;
+    const high = writes.find((w) => w.payload.address === 19006).payload.value;
+    const low = writes.find((w) => w.payload.address === 19007).payload.value;
     const total = registersToFloat32(high, low);
     const expected = SAMPLE_METER.readings.active_power_l1_w + SAMPLE_METER.readings.active_power_l2_w + SAMPLE_METER.readings.active_power_l3_w;
     assert.ok(Math.abs(total - expected) < 1e-1);
@@ -132,7 +133,7 @@ test('modbus: total active power = L1 + L2 + L3', () => {
 
 test('modbus: address layout matches register_map.py', () => {
     const writes = buildWrites(SAMPLE_METER);
-    const used = Array.from(new Set(writes.map((w) => w.payload.register))).sort((a, b) => a - b);
+    const used = Array.from(new Set(writes.map((w) => w.payload.address))).sort((a, b) => a - b);
     // 13 floats × 2 registers = 26 unique addresses
     assert.equal(used.length, 26);
     // Spot-check spec addresses
@@ -161,4 +162,10 @@ test('modbus flow: server listens on unprivileged port 5020', () => {
 test('modbus flow: no unwired link-in nodes', () => {
     const dead = readFlow().filter((n) => n.type === 'link in' && (!n.links || n.links.length === 0));
     assert.deepEqual(dead, []);
+});
+
+test('modbus flow: writer emits the modbus-server input contract', () => {
+    const writer = readFlow().find((n) => n.id === 'fn-modbus-writer');
+    assert.match(writer.func, /register: 'holding', address: addr/);
+    assert.doesNotMatch(writer.func, /fc: 'FC6'/);
 });

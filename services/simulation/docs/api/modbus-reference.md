@@ -14,7 +14,7 @@
 | Protocol | Modbus TCP |
 | Default Port | 5020 |
 | Unit ID | 1 |
-| Supported Functions | FC 03 (Read Holding Registers), FC 04 (Read Input Registers) |
+| Supported Functions | FC 03 (Read Holding Registers) |
 | Max Concurrent Clients | 10+ |
 
 ## Register Map
