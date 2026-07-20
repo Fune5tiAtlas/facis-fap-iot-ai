@@ -100,10 +100,14 @@ test('modbus-client: offsets match the fixture register map (base 19000)', () =>
         '..', '..', 'simulation', 'orce', 'flows', 'facis-simulation-modbus.json'
     ));
     const writer = simFlow.find((n) => n.id === 'fn-modbus-writer');
+    // The fixture writer declares offsets relative to BASE_REGISTER.
+    const base = writer.func.match(/BASE_REGISTER = (\d+)/);
+    assert.ok(base, 'fixture BASE_REGISTER not found');
+    assert.equal(Number(base[1]), 19000, 'fixture base register');
     for (const [metric, offset] of Object.entries(OFFSETS)) {
         const m = writer.func.match(new RegExp(`${metric}:\\s*(\\d+)`));
         assert.ok(m, `fixture register for ${metric} not found`);
-        assert.equal(Number(m[1]) - 19000, offset, `offset mismatch for ${metric}`);
+        assert.equal(Number(m[1]), offset, `offset mismatch for ${metric}`);
     }
 });
 
