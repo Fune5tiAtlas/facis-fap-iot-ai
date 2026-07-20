@@ -39,17 +39,43 @@ test('dsp-consumer-iam-call is a link call targeting dsp-iam-verify-in', () => {
     assert.deepEqual(iamCall.wires, [['dsp-consumer-iam-branch']]);
 });
 
-test('dsp-consumer-iam-branch is a switch on iamRejected wired [response, prep-transfer-fn]', () => {
+test('dsp-consumer-iam-branch is a switch on iamRejected wired [response, issue-call]', () => {
     const branch = byId(consumerFlow, 'dsp-consumer-iam-branch');
     assert.ok(branch, 'dsp-consumer-iam-branch node must exist');
     assert.equal(branch.type, 'switch');
     assert.equal(branch.property, 'iamRejected');
     assert.equal(branch.propertyType, 'msg');
     assert.deepEqual(branch.rules, [{ t: 'true' }, { t: 'false' }]);
+    // accepted (iamRejected=false) now routes through the VP mint (iam.issue)
+    // before the first provider hop, so the outbound hops carry a Bearer VP.
     assert.deepEqual(branch.wires, [
         ['dsp-consumer-response'],
-        ['dsp-consumer-prep-transfer-fn']
+        ['dsp-consumer-issue-call']
     ]);
+});
+
+test('dsp-consumer-issue-call is a link call to iam.issue, wired into prep-transfer-fn', () => {
+    const issueCall = byId(consumerFlow, 'dsp-consumer-issue-call');
+    assert.ok(issueCall, 'dsp-consumer-issue-call node must exist');
+    assert.equal(issueCall.type, 'link call');
+    assert.deepEqual(issueCall.links, ['dsp-iam-issue-in']);
+    assert.deepEqual(issueCall.wires, [['dsp-consumer-prep-transfer-fn']]);
+});
+
+test('issuance flow exposes dsp-iam-issue-in linked back from the consumer, and returns via link out', () => {
+    const issuanceFlow = JSON.parse(fs.readFileSync(
+        path.join(__dirname, '../../flows/facis-dsp-iam-issuance.json'), 'utf8'
+    ));
+    const linkIn = byId(issuanceFlow, 'dsp-iam-issue-in');
+    assert.ok(linkIn, 'dsp-iam-issue-in node must exist');
+    assert.equal(linkIn.type, 'link in');
+    assert.ok(linkIn.links.includes('dsp-consumer-issue-call'));
+    assert.deepEqual(linkIn.wires, [['dsp-iam-issue-fn']]);
+
+    const linkOut = byId(issuanceFlow, 'dsp-iam-issue-return');
+    assert.ok(linkOut, 'dsp-iam-issue-return node must exist');
+    assert.equal(linkOut.type, 'link out');
+    assert.equal(linkOut.mode, 'return');
 });
 
 test('dsp-iam-verify-in links array includes dsp-consumer-iam-call', () => {

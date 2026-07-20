@@ -105,6 +105,12 @@ dsp:
     # -- This connector's own did:web identity (the VP's expected `aud`).
     vpAudience: "did:web:fap-iotai.facis.cloud"
     # -- Comma-separated allowlist of trusted VC-issuer DIDs.
+    #    ENFORCE-MODE NF-2 REQUIREMENT: to run the consumer ingest E2E
+    #    (POST /dsp/ingest, flow #3) under enforce=enforce, this MUST include
+    #    connectorDid below — the consumer attaches a self-issued VP to its
+    #    own internal provider hops, and the provider's iam.verify rejects it
+    #    as untrusted_issuer unless the connector's own DID is trusted here.
+    #    e.g. trustedIssuers: "did:web:fap-iotai.facis.cloud"
     trustedIssuers: ""
     jtiTtlSeconds: 300
     didCacheTtlSeconds: 300

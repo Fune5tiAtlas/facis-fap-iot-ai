@@ -267,5 +267,57 @@
     "x": 990,
     "y": 80,
     "wires": []
+  },
+  {
+    "id": "dsp-iam-issue-in",
+    "type": "link in",
+    "z": "tab-dsp-iam-issuance",
+    "name": "← iam.issue (call)",
+    "links": [
+      "dsp-consumer-issue-call"
+    ],
+    "x": 150,
+    "y": 400,
+    "wires": [
+      [
+        "dsp-iam-issue-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issue-fn",
+    "type": "function",
+    "z": "tab-dsp-iam-issuance",
+    "name": "mint self-issued VP",
+    "func": "// Mint a short-lived, self-issued Verifiable Presentation for THIS\n// connector's own outbound DSP calls (the NF-2 consumer's internal provider\n// hops). Reuses the SAME jose+key+DID signing pattern as\n// dsp-iam-issuance-vc-fn: self-issue a minimal Participant VC and wrap it in\n// a holder-bound VP, both signed with env.get('DSP_CONNECTOR_KEY') under\n// env.get('DSP_CONNECTOR_DID'). No credentialStatus is attached, so the\n// provider's iam.verify accepts the VP without a BitstringStatusList round\n// trip (a VC with no credentialStatus always skips the revocation check).\n//\n// Reached via `link call` (iam.issue), returns via `link out` (return):\n// sets msg.vpToken on success, msg.vpToken = null on any failure. A mint\n// failure is logged via node.error and never crashes the flow — the caller\n// then makes an unauthenticated hop, which still succeeds under\n// DSP_IAM_ENFORCE=warn (matching this verifier's warn-mode posture).\n//\n// CONFIG: the connector's own DID (DSP_CONNECTOR_DID) MUST be listed in\n// DSP_TRUSTED_ISSUERS for the provider's iam.verify to accept this\n// self-issued VP — see orce/README.md's NF-2 section.\nconst did = env.get('DSP_CONNECTOR_DID');\nconst rawKey = env.get('DSP_CONNECTOR_KEY');\nif (!did || !rawKey) {\n    node.error('[iam-issue] DSP_CONNECTOR_DID/DSP_CONNECTOR_KEY not provisioned — cannot mint VP');\n    msg.vpToken = null;\n    return msg;\n}\n\n(async () => {\n    try {\n        const privateJwk = typeof rawKey === 'string' ? JSON.parse(rawKey) : rawKey;\n        const alg = privateJwk.alg || 'ES256';\n        const kid = did + '#key-1';\n        const key = await jose.importJWK(privateJwk, alg);\n        const audience = env.get('DSP_VP_AUDIENCE') || 'did:web:fap-iotai.facis.cloud';\n        const newJti = () => 'urn:uuid:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);\n\n        const vc = {\n            '@context': ['https://www.w3.org/2018/credentials/v1', 'https://w3id.org/security/suites/jws-2020/v1'],\n            type: ['VerifiableCredential', 'ParticipantCredential'],\n            id: kid,\n            issuer: did,\n            credentialSubject: { id: did, type: 'gx:LegalParticipant', 'gx:legalName': 'FACIS IoT-AI DSP Connector' }\n        };\n        const vcJwt = await new jose.SignJWT({ vc: vc })\n            .setProtectedHeader({ alg: alg, kid: kid, typ: 'vc+jwt' })\n            .setIssuer(did).setSubject(did).setJti(newJti()).setIssuedAt().setExpirationTime('5m')\n            .sign(key);\n\n        const vpJwt = await new jose.SignJWT({ vp: { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiablePresentation'], verifiableCredential: [vcJwt] } })\n            .setProtectedHeader({ alg: alg, kid: kid, typ: 'vp+jwt' })\n            .setIssuer(did).setSubject(did).setAudience(audience).setJti(newJti()).setIssuedAt().setExpirationTime('5m')\n            .sign(key);\n\n        msg.vpToken = vpJwt;\n        node.send(msg);\n    } catch (err) {\n        node.error('[iam-issue] VP mint failed: ' + err.message, msg);\n        msg.vpToken = null;\n        node.send(msg);\n    }\n})();\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose"
+      }
+    ],
+    "x": 440,
+    "y": 400,
+    "wires": [
+      [
+        "dsp-iam-issue-return"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-iam-issue-return",
+    "type": "link out",
+    "z": "tab-dsp-iam-issuance",
+    "name": "return to caller",
+    "mode": "return",
+    "links": [],
+    "x": 700,
+    "y": 400,
+    "wires": []
   }
 ]

@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "FACIS DSP — Consumer Ingest",
     "disabled": false,
-    "info": "POST /dsp/ingest (NF-2 / FR-DL-001 consumer side). Given a\nprovider base URL, an already-negotiated agreementId, and an assetId,\ndrives that provider's own /dsp/transfers endpoint, follows the returned\naccess object, pulls the data, and lands it in this instance's OWN Bronze\nlayer via Kafka (dsp.ingest.raw → bronze.dsp_ingest, see Task 3).\n\nDoes NOT drive contract negotiation itself — negotiation\n(POST /dsp/negotiations) is a separate, already-implemented phase; call\nit first to obtain agreementId. Does NOT attach a VP to its own outbound\ncalls (DSP_IAM_ENFORCE=warn in the live deployment does not require one;\nattaching one is a known follow-up, see orce/README.md's NF-2 section)."
+    "info": "POST /dsp/ingest (NF-2 / FR-DL-001 consumer side). Given a\nprovider base URL, an already-negotiated agreementId, and an assetId,\ndrives that provider's own /dsp/transfers endpoint, follows the returned\naccess object, pulls the data, and lands it in this instance's OWN Bronze\nlayer via Kafka (dsp.ingest.raw → bronze.dsp_ingest, see Task 3).\n\nDoes NOT drive contract negotiation itself — negotiation\n(POST /dsp/negotiations) is a separate, already-implemented phase; call\nit first to obtain agreementId. Attaches a short-lived self-issued VP\n(minted via the iam.issue link-call into facis-dsp-iam-issuance.json) as a\nBearer token on both internal provider hops (POST /dsp/transfers,\nGET /dsp/transfers/:id) so the provider's own iam.verify accepts them under\nDSP_IAM_ENFORCE=enforce. The connector's own DID must be in\nDSP_TRUSTED_ISSUERS for that self-issued VP to verify (see orce/README.md's\nNF-2 section). Mint failure is non-fatal: the hops fall back to no auth,\nwhich still succeeds under DSP_IAM_ENFORCE=warn."
   },
   {
     "id": "dsp-consumer-prep-transfer-fn",
     "type": "function",
     "z": "tab-dsp-consumer",
     "name": "validate request, prep POST /dsp/transfers",
-    "func": "function dspError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons };\n    return msg;\n}\n\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.providerBaseUrl || !body.assetId || !body.agreementId) {\n    return [dspError(422, 'invalid_request', ['providerBaseUrl, assetId, and agreementId are required']), null];\n}\n\nconst providerBaseUrl = body.providerBaseUrl.replace(/\\/$/, '');\nmsg._dspConsumer = {\n    providerBaseUrl: providerBaseUrl,\n    assetId: body.assetId,\n    agreementId: body.agreementId,\n    windowFrom: body.windowFrom || '',\n    windowTo: body.windowTo || ''\n};\nmsg.url = providerBaseUrl + '/dsp/transfers';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = {\n    agreementId: body.agreementId,\n    assetId: body.assetId,\n    format: 'http-pull',\n    parameters: { windowFrom: msg._dspConsumer.windowFrom, windowTo: msg._dspConsumer.windowTo }\n};\nreturn [null, msg];\n",
+    "func": "function dspError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons };\n    return msg;\n}\n\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.providerBaseUrl || !body.assetId || !body.agreementId) {\n    return [dspError(422, 'invalid_request', ['providerBaseUrl, assetId, and agreementId are required']), null];\n}\n\nconst providerBaseUrl = body.providerBaseUrl.replace(/\\/$/, '');\nconst vp = msg.vpToken;\nmsg._dspConsumer = {\n    providerBaseUrl: providerBaseUrl,\n    assetId: body.assetId,\n    agreementId: body.agreementId,\n    windowFrom: body.windowFrom || '',\n    windowTo: body.windowTo || '',\n    vp: vp || ''\n};\nmsg.url = providerBaseUrl + '/dsp/transfers';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\nif (vp) { msg.headers['Authorization'] = 'Bearer ' + vp; }\nmsg.payload = {\n    agreementId: body.agreementId,\n    assetId: body.assetId,\n    format: 'http-pull',\n    parameters: { windowFrom: msg._dspConsumer.windowFrom, windowTo: msg._dspConsumer.windowTo }\n};\nreturn [null, msg];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -34,7 +34,7 @@
     "type": "function",
     "z": "tab-dsp-consumer",
     "name": "validate transfer-create response, prep GET",
-    "func": "function dspError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons };\n    return msg;\n}\n\nconst ok = msg.statusCode === 202 && msg.payload && typeof msg.payload === 'object' && typeof msg.payload.transferId === 'string';\nif (!ok) {\n    return [dspError(502, 'provider_transfer_create_failed', ['provider did not return a valid transferId', 'statusCode=' + msg.statusCode, 'payload=' + JSON.stringify(msg.payload)]), null];\n}\n\nmsg._dspConsumer.transferId = msg.payload.transferId;\nmsg.url = msg._dspConsumer.providerBaseUrl + '/dsp/transfers/' + encodeURIComponent(msg.payload.transferId);\nmsg.method = 'GET';\nmsg.payload = '';\nreturn [null, msg];\n",
+    "func": "function dspError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { '@context': 'https://w3id.org/dspace/2025/1/context.jsonld', '@type': 'dspace:Error', 'dspace:code': code, 'dspace:reason': reasons };\n    return msg;\n}\n\nconst ok = msg.statusCode === 202 && msg.payload && typeof msg.payload === 'object' && typeof msg.payload.transferId === 'string';\nif (!ok) {\n    return [dspError(502, 'provider_transfer_create_failed', ['provider did not return a valid transferId', 'statusCode=' + msg.statusCode, 'payload=' + JSON.stringify(msg.payload)]), null];\n}\n\nmsg._dspConsumer.transferId = msg.payload.transferId;\nmsg.url = msg._dspConsumer.providerBaseUrl + '/dsp/transfers/' + encodeURIComponent(msg.payload.transferId);\nmsg.method = 'GET';\nmsg.payload = '';\nmsg.headers = { 'Content-Type': 'application/json' };\nconst vp = msg._dspConsumer.vp;\nif (vp) { msg.headers['Authorization'] = 'Bearer ' + vp; }\nreturn [null, msg];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -175,6 +175,23 @@
       [
         "dsp-consumer-response"
       ],
+      [
+        "dsp-consumer-issue-call"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-consumer-issue-call",
+    "type": "link call",
+    "z": "tab-dsp-consumer",
+    "name": "iam.issue",
+    "links": [
+      "dsp-iam-issue-in"
+    ],
+    "timeout": "10",
+    "x": 240,
+    "y": 40,
+    "wires": [
       [
         "dsp-consumer-prep-transfer-fn"
       ]

@@ -301,10 +301,28 @@ follows its access object, and lands the result in `bronze.dsp_ingest` via
 a new `dsp.ingest.raw` Kafka topic (see
 `infrastructure/lakehouse/setup_lakehouse.py` /
 `setup_nifi.py`'s `--add-bronze-table` / `--add-topic` flags). It does not
-drive contract negotiation itself and does not attach a VP to its own
-outbound calls to the provider — both are known, explicitly scoped-out
-follow-ups (`DSP_IAM_ENFORCE=warn` in the live deployment does not require
-one today).
+drive contract negotiation itself. It DOES now attach a self-issued VP to
+its own outbound calls to the provider: once per ingest run it link-calls
+`iam.issue` (`dsp-iam-issue-fn` in `facis-dsp-iam-issuance.json`), which
+mints a short-lived VP wrapping a self-issued Participant VC — both signed
+with `DSP_CONNECTOR_KEY` under `DSP_CONNECTOR_DID`, using the same
+`jose.SignJWT` pattern as the OID4VCI credential endpoint — and Bearer-sets
+it on both internal hops (`POST /dsp/transfers`, `GET /dsp/transfers/:id`).
+This lets the provider's own `iam.verify` accept the consumer's calls under
+`DSP_IAM_ENFORCE=enforce`. Mint failure is non-fatal (logged via
+`node.error`; the hops fall back to no auth, which still succeeds under
+`warn`).
+
+**Enforce-mode config prerequisite (self-issued VP)**: for the provider's
+`iam.verify` to accept the connector's own self-issued VP, the connector's
+DID (`dsp.iam.connectorDid` / `DSP_CONNECTOR_DID`,
+`did:web:fap-iotai.facis.cloud` by default) MUST be present in
+`DSP_TRUSTED_ISSUERS` (`dsp.iam.trustedIssuers`, empty by default). Without
+this, the internal hops are rejected with `untrusted_issuer` under enforce.
+The VP's `aud` is `DSP_VP_AUDIENCE` (also the connector's own DID by
+default, so this is self-consistent out of the box once the DID is
+trusted). The minted VC carries no `credentialStatus`, so no
+BitstringStatusList endpoint is needed for these internal hops.
 
 **Topic creation assumption**: `--add-topic` only provisions the NiFi
 consumer flow for `dsp.ingest.raw`; nothing in this plan creates the Kafka

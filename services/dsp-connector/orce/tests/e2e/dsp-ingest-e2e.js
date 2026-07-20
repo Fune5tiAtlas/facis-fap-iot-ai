@@ -3,12 +3,25 @@
 //   negotiate (existing) -> POST /dsp/ingest (Task 5) -> poll Trino for
 //   the new bronze.dsp_ingest row count to increase.
 //
+// This exercises the AUTHENTICATED path: the connector's /dsp/ingest handler
+// now mints a self-issued VP (iam.issue) and Bearer-attaches it to its own
+// internal provider hops, so this E2E works whether DSP_IAM_ENFORCE is warn
+// or enforce. POST /dsp/ingest is itself iam.verify-gated too; under enforce
+// this script must present a Bearer VP on the ingest request. Supply one via
+// --vp-token <jwt> (or the DSP_VP_TOKEN env var); mint it with the connector's
+// own POST /iam/oid4vci/credential + a VP wrapper, or reuse tests/fixtures/iam.
+// Under warn/off no token is needed and the flag may be omitted.
+//
+// NOTE (enforce, flow #3): the connector's own DID (DSP_CONNECTOR_DID) must be
+// listed in DSP_TRUSTED_ISSUERS for the provider to accept the self-issued VP
+// on the internal hops — see orce/README.md's NF-2 section.
+//
 // Requires a reachable live cluster and DSP_BASE_URL / TRINO_* env vars
 // (or a --env-file matching setup_lakehouse.py's KEY=VALUE convention).
 // Not part of `npm test` — run manually per orce/README.md's NF-2 section.
 //
 // Usage:
-//   node tests/e2e/dsp-ingest-e2e.js --env-file .env.cluster
+//   node tests/e2e/dsp-ingest-e2e.js --env-file .env.cluster [--vp-token <jwt>]
 
 const fs = require('fs');
 const https = require('https');
@@ -67,15 +80,21 @@ async function main() {
     const trinoPassword = process.env.FACIS_TRINO_PASSWORD || '';
     const assetId = process.argv.includes('--asset-id') ? process.argv[process.argv.indexOf('--asset-id') + 1] : 'dataset:facis:net-grid-hourly';
 
+    // Bearer VP for the iam.verify-gated /dsp/* endpoints. Required under
+    // DSP_IAM_ENFORCE=enforce, ignored (harmlessly) under warn/off.
+    const vpToken = process.argv.includes('--vp-token') ? process.argv[process.argv.indexOf('--vp-token') + 1] : process.env.DSP_VP_TOKEN;
+    const dspAuth = vpToken ? { Authorization: 'Bearer ' + vpToken } : {};
+    console.log('0. auth:', vpToken ? 'presenting Bearer VP (enforce-ready)' : 'no VP supplied (warn/off only)');
+
     console.log('1. Negotiating agreement for', assetId);
-    const neg = await req('POST', baseUrl + '/dsp/negotiations', { counterparty: 'did:web:fap-iotai.facis.cloud', offerId: assetId.replace('dataset:', 'offer:') + ':read' });
+    const neg = await req('POST', baseUrl + '/dsp/negotiations', { counterparty: 'did:web:fap-iotai.facis.cloud', offerId: assetId.replace('dataset:', 'offer:') + ':read' }, dspAuth);
     if (neg.statusCode >= 300 || !neg.body.negotiationId) throw new Error('negotiation failed: ' + JSON.stringify(neg.body));
     console.log('   negotiation created, negotiationId =', neg.body.negotiationId);
 
     // POST /dsp/negotiations auto-finalises server-side but only returns
     // {negotiationId} (see dsp-neg-create in facis-dsp-negotiations.json);
     // the agreementId is only available via a follow-up GET.
-    const negGet = await req('GET', baseUrl + '/dsp/negotiations/' + neg.body.negotiationId);
+    const negGet = await req('GET', baseUrl + '/dsp/negotiations/' + neg.body.negotiationId, undefined, dspAuth);
     if (negGet.statusCode >= 300 || !negGet.body.agreementId) throw new Error('negotiation lookup failed: ' + JSON.stringify(negGet.body));
     console.log('   agreement finalized, agreementId =', negGet.body.agreementId);
 
@@ -84,7 +103,7 @@ async function main() {
     console.log('   before =', before);
 
     console.log('3. POST /dsp/ingest');
-    const ingest = await req('POST', baseUrl + '/dsp/ingest', { providerBaseUrl: baseUrl, assetId, agreementId: negGet.body.agreementId });
+    const ingest = await req('POST', baseUrl + '/dsp/ingest', { providerBaseUrl: baseUrl, assetId, agreementId: negGet.body.agreementId }, dspAuth);
     if (ingest.statusCode !== 202) throw new Error('ingest failed: ' + JSON.stringify(ingest.body));
     console.log('   accepted, rowCount =', ingest.body.rowCount);
 
