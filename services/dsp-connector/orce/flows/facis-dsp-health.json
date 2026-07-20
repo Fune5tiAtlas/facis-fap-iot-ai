@@ -28,7 +28,7 @@
     "type": "function",
     "z": "tab-dsp-health",
     "name": "build health body",
-    "func": "const transfers = flow.get('transfers') || {};\nmsg.payload = {\n    status: 'ok',\n    service: 'dsp-connector',\n    transfers_count: Object.keys(transfers).length\n};\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
+    "func": "const transfers = global.get('transfers') || {};\nmsg.payload = {\n    status: 'ok',\n    service: 'dsp-connector',\n    transfers_count: Object.keys(transfers).length\n};\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,

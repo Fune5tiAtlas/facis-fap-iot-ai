@@ -3,7 +3,7 @@
 // state-persistence.spec.js — verify that the JSON serialisation /
 // deserialisation cycle used by the State tab preserves all transfer fields.
 //
-// The State tab does:  flow.set('transfers', map)  →  JSON.stringify(map, null, 2)
+// The State tab does:  global.set('transfers', map)  →  JSON.stringify(map, null, 2)
 //                       → file out → file in on next boot → JSON.parse(...)
 //
 // Any structural or type drift across that boundary (missing field, key

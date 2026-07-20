@@ -227,3 +227,21 @@ test('restore failure raises a catchable error and leaves populated maps intact'
     assert.equal(globalCtx.get('transfers'), existingTransfers, 'transfers map untouched');
     assert.deepEqual(norm(globalCtx.get('negotiations')), { 'neg-keep': {} });
 });
+
+// Regression guard for the NF-5 global-scope unification: the transfers store
+// MUST live in GLOBAL context in every flow, so the Postgres persist/restore
+// (which reads/writes global) and the transfers producer + health counters see
+// the same map. A flow-scoped `flow.get/set('transfers')` anywhere silently
+// splits the store back into per-tab copies — the exact data-loss bug this task
+// fixed. Reading the raw files (not the parsed func bodies) also catches a stray
+// reference in a doc/info field, which parsed-func tests would miss.
+test('no flow-scoped transfers store remains in any DSP flow (must be global)', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const flows = ['facis-dsp-transfers.json', 'facis-dsp-health.json'];
+    for (const f of flows) {
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', 'flows', f), 'utf8');
+        const hits = src.match(/flow\.(get|set)\('transfers'/g) || [];
+        assert.equal(hits.length, 0, f + " still has flow-scoped 'transfers': " + JSON.stringify(hits));
+    }
+});

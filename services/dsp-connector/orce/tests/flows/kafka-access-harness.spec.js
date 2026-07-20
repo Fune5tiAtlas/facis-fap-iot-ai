@@ -41,8 +41,8 @@ function createMsg(bodyOverrides) {
 }
 
 test('kafka-streaming: transfer stored STARTED, routed to the admin node on output 6', async () => {
-    const flowCtx = new Map();
-    const r = await runNode(FLOW, 'dsp-tx-create', { msg: createMsg(), env: {}, flowCtx });
+    const globalCtx = new Map();
+    const r = await runNode(FLOW, 'dsp-tx-create', { msg: createMsg(), env: {}, globalCtx });
     assert.equal(r.result.length, 6);
     assert.equal(r.result[0], null, 'no synchronous HTTP response — dsp-tx-kafka-admin owns it');
     assert.equal(r.result[1], null, 'no persist yet — dsp-tx-kafka-admin persists the final state');
@@ -52,7 +52,7 @@ test('kafka-streaming: transfer stored STARTED, routed to the admin node on outp
     assert.ok(out, 'output 6 must carry the provisioning msg');
     assert.equal(out._kafkaAction, 'create');
     assert.equal(out.res._marker, 'live-res-handle', 'res handle must survive for the deferred response');
-    const stored = flowCtx.get('transfers')[out._transferId];
+    const stored = globalCtx.get('transfers')[out._transferId];
     assert.equal(stored.state, 'STARTED');
     assert.equal(stored.access, null, 'access only attaches after the topic really exists');
 });
@@ -90,15 +90,15 @@ test('expiresAt keeps the Python isoformat µs + +00:00 shape (advisory TTL)', a
 });
 
 test('http-pull regression: still synchronous auto-complete, output 6 null', async () => {
-    const flowCtx = new Map();
+    const globalCtx = new Map();
     const r = await runNode(FLOW, 'dsp-tx-create', {
         msg: createMsg({ format: 'http-pull' }),
         env: { DSP_HMAC_SECRET: 'test-secret' },
-        flowCtx
+        globalCtx
     });
     assert.equal(r.result[0].statusCode, 202);
     assert.equal(r.result[5], null);
-    const stored = flowCtx.get('transfers')[r.result[0].payload.transferId];
+    const stored = globalCtx.get('transfers')[r.result[0].payload.transferId];
     assert.equal(stored.state, 'COMPLETED');
     assert.ok(stored.access.url);
 });
@@ -124,16 +124,16 @@ test('create-error: provisioning failure still records access.topic (so terminat
     const topic = 'iot.dataset.dataset-facis-net-grid-hourly.' + transferId;
     const access = { url: null, token: null, bootstrap: '212.132.83.222:9093', topic, sasl: null, accessNote: 'n/a', expiresAt: '2026-07-19T01:00:00.000000+00:00' };
     const transfer = { id: transferId, agreementId: 'agr-1', assetId: 'dataset:facis:net-grid-hourly', format: 'kafka-streaming', state: 'STARTED', access: null, reason: null, parameters: {}, createdAt: '2026-07-19T00:00:00.000000+00:00', updatedAt: '2026-07-19T00:00:00.000000+00:00' };
-    const flowCtx = new Map([['transfers', { [transferId]: transfer }]]);
+    const globalCtx = new Map([['transfers', { [transferId]: transfer }]]);
     // err.code is neither ALREADY_EXISTS nor UNKNOWN_TOPIC — the real "broker
     // committed but the client call still errored" (e.g. op timeout) shape.
     const err = Object.assign(new Error('Local: Timed out'), { code: -185 });
     const r = await runNode(FLOW, 'dsp-tx-kafka-admin', {
         msg: { _kafkaAction: 'create', _transferId: transferId, _kafkaAccess: access, req: {}, res: {} },
-        flowCtx,
+        globalCtx,
         libs: { Kafka: stubKafka(err) }
     });
-    const stored = flowCtx.get('transfers')[transferId];
+    const stored = globalCtx.get('transfers')[transferId];
     assert.equal(stored.state, 'ERROR', 'failed provisioning lands in ERROR');
     assert.ok(stored.access, 'access must be attached even on ERROR');
     assert.equal(stored.access.topic, topic, 'topic name recorded so terminate can delete it');
