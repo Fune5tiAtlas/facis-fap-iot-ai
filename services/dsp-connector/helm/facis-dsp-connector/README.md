@@ -14,8 +14,13 @@ The DSP control plane is owned by the ORCE pod via Node-RED flows under
   for the ORCE pod to mount at `/data/dsp-config/datasets.json` (read-only
   catalogue source).
 - `Secret/<fullname>-dsp-secrets` — DSP_HMAC_SECRET, DSP_DATA_API_BASE_URL,
-  DSP_DEFAULT_TTL_SECONDS, DSP_KAFKA_BOOTSTRAP, plus the NF-1 identity
-  values under `dsp.iam.*`. Consumed by the ORCE pod via `envFrom`.
+  DSP_DEFAULT_TTL_SECONDS, DSP_KAFKA_BOOTSTRAP, DSP_TRINO_URL (external
+  coordinator address — the Trino coordinator lives on a separate Stackable
+  cluster whose internal DNS name does not resolve from the ORCE pod),
+  SFTP_KAFKA_BROKERS (`dsp.kafkaBrokers` — full broker list for the
+  consumer-side ingest flow's `${SFTP_KAFKA_BROKERS}` substitution), plus the
+  NF-1 identity values under `dsp.iam.*`. Consumed by the ORCE pod via
+  `envFrom`.
 - `PersistentVolumeClaim/facis-dsp-state` — backs `/data/dsp-state/` on the
   ORCE pod for `transfers.json` + `negotiations.json`.
 - `StatefulSet/<fullname>-mongo` + `Service/<fullname>-mongo` — self-contained
