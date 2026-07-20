@@ -188,6 +188,18 @@ jobs:
         working-directory: services/dsp-connector/orce/tests
         run: node --test flows/*.spec.js
 
+      - name: Simulation — install spec deps (seedrandom)
+        working-directory: services/simulation/orce
+        run: npm install --no-save --no-audit --no-fund seedrandom
+
+      - name: Simulation — flow specs
+        working-directory: services/simulation/orce
+        run: node --test tests/flows/*.spec.js
+
+      - name: Industrial Ingestion — flow specs
+        working-directory: services/industrial-ingestion-service/orce/tests
+        run: node --test flows/*.spec.js
+
       - name: SFTP Ingestion — install dev deps (csv-parse)
         working-directory: services/sftp-ingestion-service/orce/tests
         run: npm install --include=dev
