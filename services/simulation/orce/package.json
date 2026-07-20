@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "node-red-contrib-modbus": "*",
+    "node-red-contrib-opcua": "0.2.354",
     "node-red-contrib-rdkafka": "*",
     "node-red-contrib-uibuilder": "*",
     "seedrandom": "^3.0.5"

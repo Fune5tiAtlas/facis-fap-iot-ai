@@ -37,6 +37,8 @@ This project includes or depends on the following third-party software:
 | Apache Iceberg | Apache-2.0 | Table format (runtime) |
 | Node-RED | Apache-2.0 | ORCE orchestration (runtime) |
 | node-red-contrib-rdkafka | MIT | Kafka producer for Node-RED |
+| node-red-contrib-modbus | BSD-3-Clause | Modbus TCP server/client nodes for Node-RED |
+| node-red-contrib-opcua | Apache-2.0 | OPC UA server/client nodes for Node-RED |
 
 ## Cryptography
 

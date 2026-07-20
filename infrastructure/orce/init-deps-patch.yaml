@@ -75,10 +75,12 @@ spec:
                 echo "[init-deps] package.json missing - init-data has not run yet; skipping"
                 exit 0
               fi
-              PKGS="node-red-contrib-modbus node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom jose@5.10.0 jsonld@9.0.0 @gaia-x/json-web-signature-2020@2.3.0 node-red-contrib-mongodb4@3.4.0"
+              PKGS="node-red-contrib-modbus node-red-contrib-opcua@0.2.354 node-red-contrib-rdkafka ssh2-sftp-client csv-parse seedrandom jose@5.10.0 jsonld@9.0.0 @gaia-x/json-web-signature-2020@2.3.0 node-red-contrib-mongodb4@3.4.0"
               MISSING=""
               for p in $PKGS; do
-                if [ ! -d "node_modules/$p" ]; then MISSING="$MISSING $p"; fi
+                name="${p%@*}"
+                [ -z "$name" ] && name="$p"
+                if [ ! -d "node_modules/$name" ]; then MISSING="$MISSING $p"; fi
               done
 
               # Detect whether the existing librdkafka was built with OpenSSL.

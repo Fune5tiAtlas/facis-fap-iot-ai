@@ -48,6 +48,9 @@ RUN mkdir -p /opt/jsonforms-staging && \
 # ── Simulation + DSP + SFTP runtime modules ─────────────────────────
 # node-red-contrib-modbus: Modbus TCP master + slave nodes used by the
 #   ORCE-native Modbus adapter (replaces src/api/modbus/server.py).
+# node-red-contrib-opcua (pinned): OPC UA server + client nodes used by
+#   the OPC UA demo server adapter and the industrial ingestion flows
+#   (services/industrial-ingestion-service/orce/). Pure JS (node-opcua).
 # seedrandom: deterministic JS-native PRNG used by the simulation engine
 #   subflows. Same (base_seed, entity_id, ts_ms) → same float sequence,
 #   byte-stable across pod restarts.
@@ -67,6 +70,7 @@ RUN mkdir -p /opt/sim-runtime-staging && \
     npm init -y && \
     npm install \
         node-red-contrib-modbus \
+        node-red-contrib-opcua@0.2.354 \
         seedrandom \
         ssh2-sftp-client \
         csv-parse
