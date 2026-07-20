@@ -48,8 +48,12 @@
     "property": "iamRejected",
     "propertyType": "msg",
     "rules": [
-      { "t": "true" },
-      { "t": "false" }
+      {
+        "t": "true"
+      },
+      {
+        "t": "false"
+      }
     ],
     "checkall": "true",
     "repair": false,
@@ -70,7 +74,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "auto-finalise",
-    "func": "const body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.counterparty || !body.offerId) {\n    msg.statusCode = 422;\n    msg.payload = { detail: 'counterparty and offerId are required' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst negId = 'neg-' + crypto.randomBytes(6).toString('hex');\nconst agrId = 'agr-' + crypto.randomBytes(6).toString('hex');\n\nconst counterparty = (msg.identity && msg.identity.did) ? msg.identity.did : body.counterparty;\nconst negotiation = {\n    id: negId,\n    state: 'FINALIZED',\n    agreementId: agrId,\n    offerId: body.offerId,\n    counterparty: counterparty,\n    createdAt: now,\n    updatedAt: now\n};\n\nconst negs = global.get('negotiations') || {};\nnegs[negId] = negotiation;\nglobal.set('negotiations', negs);\n\nnode.log('Negotiation ' + negId + ' auto-finalised → agreement ' + agrId);\n\nmsg.payload = { negotiationId: negId };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 202;\nreturn [msg, { payload: '' }];\n",
+    "func": "function dspNegotiationError(statusCode, code, reasons, providerPid, consumerPid) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': ['https://w3id.org/dspace/2025/1/context.jsonld'],\n        '@type': 'ContractNegotiationError',\n        providerPid: providerPid || 'urn:facis:dsp:unknown',\n        consumerPid: consumerPid || 'urn:facis:dsp:unknown',\n        code: code,\n        reason: reasons\n    };\n    return msg;\n}\n\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (!body.counterparty || !body.offerId) {\n    return [dspNegotiationError(422, 'invalid_request', ['counterparty and offerId are required'], null, body.consumerPid), null];\n}\nconst now = new Date().toISOString();\nconst negId = 'neg-' + crypto.randomBytes(6).toString('hex');\nconst agrId = 'agr-' + crypto.randomBytes(6).toString('hex');\n\nconst counterparty = (msg.identity && msg.identity.did) ? msg.identity.did : body.counterparty;\nconst negotiation = {\n    id: negId,\n    providerPid: negId,\n    consumerPid: body.consumerPid || negId,\n    state: 'FINALIZED',\n    agreementId: agrId,\n    offerId: body.offerId,\n    counterparty: counterparty,\n    createdAt: now,\n    updatedAt: now\n};\n\nconst negs = global.get('negotiations') || {};\nnegs[negId] = negotiation;\nglobal.set('negotiations', negs);\n\nnode.log('Negotiation ' + negId + ' auto-finalised → agreement ' + agrId);\n\nmsg.payload = { negotiationId: negId };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 202;\nreturn [msg, { payload: '' }];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -115,7 +119,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "read by id",
-    "func": "const negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst found = negs[id];\nif (!found) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n} else {\n    msg.statusCode = 200;\n    msg.payload = found;\n}\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
+    "func": "function dspNegotiationError(statusCode, code, reasons, providerPid, consumerPid) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': ['https://w3id.org/dspace/2025/1/context.jsonld'],\n        '@type': 'ContractNegotiationError',\n        providerPid: providerPid || 'urn:facis:dsp:unknown',\n        consumerPid: consumerPid || 'urn:facis:dsp:unknown',\n        code: code,\n        reason: reasons\n    };\n    return msg;\n}\n\nconst negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst found = negs[id];\nif (!found) {\n    dspNegotiationError(404, 'not_found', ['Negotiation ' + id + ' not found'], id, id);\n} else {\n    msg.statusCode = 200;\n    msg.payload = found;\n}\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -152,7 +156,7 @@
     "type": "function",
     "z": "tab-dsp-negotiations",
     "name": "terminate",
-    "func": "const negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst neg = negs[id];\nif (!neg) {\n    msg.statusCode = 404;\n    msg.payload = { detail: 'Negotiation ' + id + ' not found' };\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst terminated = Object.assign({}, neg, { state: 'TERMINATED', updatedAt: now });\nnegs[id] = terminated;\nglobal.set('negotiations', negs);\n\nmsg.payload = terminated;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: '' }];\n",
+    "func": "function dspNegotiationError(statusCode, code, reasons, providerPid, consumerPid) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': ['https://w3id.org/dspace/2025/1/context.jsonld'],\n        '@type': 'ContractNegotiationError',\n        providerPid: providerPid || 'urn:facis:dsp:unknown',\n        consumerPid: consumerPid || 'urn:facis:dsp:unknown',\n        code: code,\n        reason: reasons\n    };\n    return msg;\n}\n\nconst negs = global.get('negotiations') || {};\nconst id = msg.req.params.id;\nconst neg = negs[id];\nif (!neg) {\n    dspNegotiationError(404, 'not_found', ['Negotiation ' + id + ' not found'], id, id);\n    msg.headers = { 'Content-Type': 'application/json' };\n    return [msg, null];\n}\nconst now = new Date().toISOString();\nconst terminated = Object.assign({}, neg, { state: 'TERMINATED', updatedAt: now });\nnegs[id] = terminated;\nglobal.set('negotiations', negs);\n\nmsg.payload = terminated;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: '' }];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,

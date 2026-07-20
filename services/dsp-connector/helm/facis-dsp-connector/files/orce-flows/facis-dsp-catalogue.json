@@ -178,6 +178,60 @@
     ]
   },
   {
+    "id": "dsp-cat-in-alias",
+    "type": "http in",
+    "z": "tab-dsp-catalogue",
+    "name": "POST /dsp/catalog/request (DSP binding spelling)",
+    "url": "/dsp/catalog/request",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 300,
+    "wires": [
+      [
+        "dsp-cat-mode-check"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-in-dataset",
+    "type": "http in",
+    "z": "tab-dsp-catalogue",
+    "name": "GET /dsp/catalog/datasets/:id",
+    "url": "/dsp/catalog/datasets/:id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 340,
+    "wires": [
+      [
+        "dsp-cat-dataset-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-dataset-fn",
+    "type": "function",
+    "z": "tab-dsp-catalogue",
+    "name": "dataset lookup",
+    "func": "function dspCatalogError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': ['https://w3id.org/dspace/2025/1/context.jsonld'],\n        '@type': 'CatalogError',\n        code: code,\n        reason: reasons\n    };\n    return msg;\n}\n\nconst datasets = flow.get('catalogue') || [];\nconst id = decodeURIComponent(msg.req.params.id || '');\nconst found = datasets.find((d) => d && d.id === id);\nif (!found) {\n    return dspCatalogError(404, 'not_found', ['Dataset ' + id + ' not found']);\n}\nmsg.statusCode = 200;\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = found;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 340,
+    "wires": [
+      [
+        "dsp-cat-response"
+      ]
+    ]
+  },
+  {
     "id": "dsp-cat-mode-check",
     "type": "function",
     "z": "tab-dsp-catalogue",
@@ -251,7 +305,7 @@
     "type": "function",
     "z": "tab-dsp-catalogue",
     "name": "query_catalogue",
-    "func": "// Mirrors catalogue_store.query_catalogue() filter + cursor logic.\nconst datasets = flow.get('catalogue') || [];\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nconst filter = body.filter || {};\nconst page = body.page || {};\n\nconst limit = (typeof page.limit === 'number' && page.limit > 0) ? page.limit : 50;\nconst cursorRaw = page.cursor;\n\nlet filtered = datasets;\nif (filter.assetType) {\n    filtered = filtered.filter(d => d && d.metadata && d.metadata.assetType === filter.assetType);\n}\nif (Array.isArray(filter.datasetIds) && filter.datasetIds.length > 0) {\n    const ids = new Set(filter.datasetIds);\n    filtered = filtered.filter(d => d && ids.has(d.id));\n}\n\n// Python: int(cursor) on ValueError -> 0; missing/null -> 0.\nlet start = 0;\nif (cursorRaw !== null && cursorRaw !== undefined && cursorRaw !== '') {\n    const parsed = parseInt(cursorRaw, 10);\n    start = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;\n}\n\nconst slice = filtered.slice(start, start + limit);\nconst nextCursor = (start + limit) < filtered.length ? String(start + limit) : null;\n\nmsg.payload = { datasets: slice, nextCursor: nextCursor };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: { family: 'facis_dsp_catalogue_requests_total' } }];\n",
+    "func": "function dspCatalogError(statusCode, code, reasons) {\n    msg.statusCode = statusCode;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = {\n        '@context': ['https://w3id.org/dspace/2025/1/context.jsonld'],\n        '@type': 'CatalogError',\n        code: code,\n        reason: reasons\n    };\n    return msg;\n}\n\n// Mirrors catalogue_store.query_catalogue() filter + cursor logic.\nconst datasets = flow.get('catalogue') || [];\nconst body = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nif (body.filter !== undefined && (typeof body.filter !== 'object' || body.filter === null || Array.isArray(body.filter))) {\n    return [dspCatalogError(400, 'unsupported_filter', ['filter must be an object']), null];\n}\nconst filter = body.filter || {};\nconst page = body.page || {};\n\nconst limit = (typeof page.limit === 'number' && page.limit > 0) ? page.limit : 50;\nconst cursorRaw = page.cursor;\n\nlet filtered = datasets;\nif (filter.assetType) {\n    filtered = filtered.filter(d => d && d.metadata && d.metadata.assetType === filter.assetType);\n}\nif (Array.isArray(filter.datasetIds) && filter.datasetIds.length > 0) {\n    const ids = new Set(filter.datasetIds);\n    filtered = filtered.filter(d => d && ids.has(d.id));\n}\n\n// Python: int(cursor) on ValueError -> 0; missing/null -> 0.\nlet start = 0;\nif (cursorRaw !== null && cursorRaw !== undefined && cursorRaw !== '') {\n    const parsed = parseInt(cursorRaw, 10);\n    start = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;\n}\n\nconst slice = filtered.slice(start, start + limit);\nconst nextCursor = (start + limit) < filtered.length ? String(start + limit) : null;\n\nmsg.payload = { datasets: slice, nextCursor: nextCursor };\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.statusCode = 200;\nreturn [msg, { payload: { family: 'facis_dsp_catalogue_requests_total' } }];\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,

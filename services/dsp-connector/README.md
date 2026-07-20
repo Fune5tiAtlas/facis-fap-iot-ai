@@ -1,6 +1,6 @@
 # DSP Connector Service
 
-Eclipse Dataspace Protocol (DSP) 1.0 connector for the FACIS FAP IoT & AI platform.
+Eclipse Dataspace Protocol (DSP) 2025-1 connector for the FACIS FAP IoT & AI platform (error binding per DSP 2025-1; TCK harness in tck/).
 Provides catalogue, negotiation, and transfer process services with HMAC-signed URL
 provisioning, plus NF-1 Identity & Trust (VP verification, did:web issuance, Identity
 Hub). Implemented as ORCE-native Node-RED flows — see `orce/README.md` for the flow
