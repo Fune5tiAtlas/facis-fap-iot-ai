@@ -144,7 +144,8 @@
       "assetType": "iot.timeseries",
       "format": "kafka/json",
       "schema": "bronze",
-      "topic": "modbus.ingest.raw"
+      "topic": "modbus.ingest.raw",
+      "table": "modbus_ingest_raw"
     },
     "offers": [
       {
@@ -165,7 +166,8 @@
       "assetType": "iot.timeseries",
       "format": "kafka/json",
       "schema": "bronze",
-      "topic": "opcua.ingest.raw"
+      "topic": "opcua.ingest.raw",
+      "table": "opcua_ingest_raw"
     },
     "offers": [
       {
