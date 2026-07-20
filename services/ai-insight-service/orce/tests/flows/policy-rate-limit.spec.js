@@ -1,83 +1,137 @@
 "use strict";
 
+// NF-6 negative evidence (QA tests 14/15/29): authorization decisions must
+// derive from the verified token identity; client-supplied role headers are
+// ignored, and a header-injection attempt is rejected.
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { evaluatePolicyAndRateLimit } = require("./helpers/policy-rate-limit");
 
-test("policy denies missing governance headers", () => {
-    const res = evaluatePolicyAndRateLimit({
-        headers: {},
-        env: {},
-        buckets: {},
-        nowMs: 1000,
+const GOVERNANCE_HEADERS = {
+    "x-agreement-id": "agreement-1",
+    "x-asset-id": "asset-7",
+};
+
+const CONSUMER_IDENTITY = {
+    sub: "svc-account-facis-orce",
+    roles: ["ai_insight_consumer"],
+};
+
+test("header injection is rejected: forged x-user-roles cannot grant a role", () => {
+    const result = evaluatePolicyAndRateLimit({
+        headers: {
+            ...GOVERNANCE_HEADERS,
+            "x-user-roles": "ai_insight_consumer,admin",
+        },
+        identity: { sub: "attacker", roles: [] },
     });
-    assert.equal(res.decision, "forbidden");
-    assert.equal(res.statusCode, 403);
-    assert.equal(res.payload.detail, "Missing required governance headers");
+    assert.equal(result.decision, "forbidden");
+    assert.equal(result.statusCode, 403);
+    assert.match(result.payload.detail, /missing required role ai_insight_consumer/);
 });
 
-test("policy denies missing required role and restricted agreement/asset", () => {
-    const missingRole = evaluatePolicyAndRateLimit({
-        headers: {
-            "x-agreement-id": "a1",
-            "x-asset-id": "asset-1",
-            "x-user-roles": "analyst",
-        },
-        env: { AI_INSIGHT_POLICY__REQUIRED_ROLES: JSON.stringify(["ai_insight_consumer"]) },
+test("verified identity with the required role passes without any role header", () => {
+    const result = evaluatePolicyAndRateLimit({
+        headers: GOVERNANCE_HEADERS,
+        identity: CONSUMER_IDENTITY,
     });
-    assert.equal(missingRole.decision, "forbidden");
-    assert.match(missingRole.payload.detail, /missing required role/);
+    assert.equal(result.decision, "ok");
+    assert.deepEqual(result.accessContext.roles, ["ai_insight_consumer"]);
+    assert.equal(result.accessContext.subject, "svc-account-facis-orce");
+});
 
-    const deniedAgreement = evaluatePolicyAndRateLimit({
-        headers: {
-            "x-agreement-id": "a1",
-            "x-asset-id": "asset-1",
-            "x-user-roles": "ai_insight_consumer",
-        },
-        env: { AI_INSIGHT_POLICY__ALLOWED_AGREEMENT_IDS: JSON.stringify(["a2"]) },
+test("authentication failure passes through as 401 (never 403)", () => {
+    const result = evaluatePolicyAndRateLimit({
+        headers: GOVERNANCE_HEADERS,
+        authRejected: true,
     });
-    assert.equal(deniedAgreement.decision, "forbidden");
-    assert.equal(deniedAgreement.payload.detail, "Policy denied for agreement_id");
+    assert.equal(result.decision, "unauthorized");
+    assert.equal(result.statusCode, 401);
+});
+
+test("missing governance headers still yields 403 for an authenticated caller", () => {
+    const result = evaluatePolicyAndRateLimit({
+        headers: {},
+        identity: CONSUMER_IDENTITY,
+    });
+    assert.equal(result.decision, "forbidden");
+    assert.match(result.payload.detail, /Missing required governance headers/);
+});
+
+test("agreement and asset allow-lists are enforced", () => {
+    const denied = evaluatePolicyAndRateLimit({
+        headers: GOVERNANCE_HEADERS,
+        identity: CONSUMER_IDENTITY,
+        env: { AI_INSIGHT_POLICY__ALLOWED_AGREEMENT_IDS: '["agreement-9"]' },
+    });
+    assert.equal(denied.statusCode, 403);
+    assert.match(denied.payload.detail, /agreement_id/);
 
     const deniedAsset = evaluatePolicyAndRateLimit({
-        headers: {
-            "x-agreement-id": "a1",
-            "x-asset-id": "asset-1",
-            "x-user-roles": "ai_insight_consumer",
-        },
-        env: { AI_INSIGHT_POLICY__ALLOWED_ASSET_IDS: JSON.stringify(["asset-2"]) },
+        headers: GOVERNANCE_HEADERS,
+        identity: CONSUMER_IDENTITY,
+        env: { AI_INSIGHT_POLICY__ALLOWED_ASSET_IDS: '["asset-1"]' },
     });
-    assert.equal(deniedAsset.decision, "forbidden");
-    assert.equal(deniedAsset.payload.detail, "Policy denied for asset_id");
+    assert.equal(deniedAsset.statusCode, 403);
+    assert.match(deniedAsset.payload.detail, /asset_id/);
 });
 
-test("rate limiter emits 429 and Retry-After", () => {
-    const headers = {
-        "x-agreement-id": "agreement-1",
-        "x-asset-id": "asset-1",
-        "x-user-roles": "ai_insight_consumer",
-    };
+test("rate limit is keyed by verified subject, not by spoofable headers", () => {
+    const buckets = {};
+    const env = { AI_INSIGHT_RATE_LIMIT__REQUESTS_PER_MINUTE: "2" };
+    const now = 1000000;
+
+    for (let i = 0; i < 2; i += 1) {
+        const ok = evaluatePolicyAndRateLimit({
+            headers: GOVERNANCE_HEADERS, identity: CONSUMER_IDENTITY, env, buckets, nowMs: now + i,
+        });
+        assert.equal(ok.decision, "ok");
+        assert.equal(ok.limiterKey, "svc-account-facis-orce|agreement-1");
+    }
+
+    const limited = evaluatePolicyAndRateLimit({
+        headers: GOVERNANCE_HEADERS, identity: CONSUMER_IDENTITY, env, buckets, nowMs: now + 10,
+    });
+    assert.equal(limited.decision, "rate_limited");
+    assert.equal(limited.statusCode, 429);
+    assert.ok(limited.retryAfter >= 1);
+
+    // A different verified subject has its own window — one caller cannot
+    // exhaust (or pollute) another caller's bucket by reusing the agreement.
+    const otherCaller = evaluatePolicyAndRateLimit({
+        headers: GOVERNANCE_HEADERS,
+        identity: { sub: "another-subject", roles: ["ai_insight_consumer"] },
+        env, buckets, nowMs: now + 20,
+    });
+    assert.equal(otherCaller.decision, "ok");
+});
+
+test("rate limit window resets after 60s", () => {
+    const buckets = {};
     const env = { AI_INSIGHT_RATE_LIMIT__REQUESTS_PER_MINUTE: "1" };
-    const first = evaluatePolicyAndRateLimit({ headers, env, buckets: {}, nowMs: 1000 });
-    assert.equal(first.decision, "ok");
-    const second = evaluatePolicyAndRateLimit({
-        headers,
-        env,
-        buckets: first.buckets,
-        nowMs: 2000,
-    });
-    assert.equal(second.decision, "rate_limited");
-    assert.equal(second.statusCode, 429);
-    assert.ok(Number(second.headers["Retry-After"]) >= 1);
+    const now = 5000000;
+    assert.equal(evaluatePolicyAndRateLimit({ headers: GOVERNANCE_HEADERS, identity: CONSUMER_IDENTITY, env, buckets, nowMs: now }).decision, "ok");
+    assert.equal(evaluatePolicyAndRateLimit({ headers: GOVERNANCE_HEADERS, identity: CONSUMER_IDENTITY, env, buckets, nowMs: now + 1000 }).decision, "rate_limited");
+    assert.equal(evaluatePolicyAndRateLimit({ headers: GOVERNANCE_HEADERS, identity: CONSUMER_IDENTITY, env, buckets, nowMs: now + 61000 }).decision, "ok");
 });
 
-test("policy/rate-limit returns access context on success and supports disabled policy", () => {
-    const res = evaluatePolicyAndRateLimit({
+test("policy disabled still resolves an access context", () => {
+    const result = evaluatePolicyAndRateLimit({
         headers: {},
+        identity: CONSUMER_IDENTITY,
         env: { AI_INSIGHT_POLICY__ENABLED: "false", AI_INSIGHT_RATE_LIMIT__ENABLED: "false" },
-        buckets: {},
     });
-    assert.equal(res.decision, "ok");
-    assert.equal(res.accessContext.agreement_id, "unknown-agreement");
-    assert.equal(res.accessContext.asset_id, "unknown-asset");
+    assert.equal(result.decision, "ok");
+    assert.equal(result.accessContext.agreement_id, "unknown-agreement");
+});
+
+test("dev-only AI_INSIGHT_AUTH__MODE=off restores legacy header roles", () => {
+    const result = evaluatePolicyAndRateLimit({
+        headers: { ...GOVERNANCE_HEADERS, "x-user-roles": "ai_insight_consumer" },
+        identity: null,
+        authMode: "off",
+    });
+    assert.equal(result.decision, "ok");
+    assert.deepEqual(result.accessContext.roles, ["ai_insight_consumer"]);
 });
