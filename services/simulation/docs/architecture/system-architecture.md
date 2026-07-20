@@ -9,6 +9,10 @@
 > Kubernetes; for migration context see
 > [`../orce-runtime/migration-guide.md`](../orce-runtime/migration-guide.md).
 
+> **FAP role mapping:** how this service and the ingestion pipeline map onto the
+> SRS's Data Provider / Data Sink / Connector roles is defined in
+> [`docs/architecture/fap-role-mapping.md`](../../../../docs/architecture/fap-role-mapping.md).
+
 ---
 
 ## 1. Overview

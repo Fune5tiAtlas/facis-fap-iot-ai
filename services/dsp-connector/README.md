@@ -5,6 +5,8 @@ Provides catalogue, negotiation, and transfer process services with HMAC-signed 
 provisioning, plus NF-1 Identity & Trust (VP verification, did:web issuance, Identity
 Hub). Implemented as ORCE-native Node-RED flows — see `orce/README.md` for the flow
 layout, tests, and deploy mechanics. This file documents the protocol surface.
+For how this connector maps onto the SRS's FAP roles (Provider/Consumer connector,
+Data Sink), see [`docs/architecture/fap-role-mapping.md`](../../docs/architecture/fap-role-mapping.md).
 
 Implements:
 - **FR-DSP-001**: Catalogue Service (SHOULD)
