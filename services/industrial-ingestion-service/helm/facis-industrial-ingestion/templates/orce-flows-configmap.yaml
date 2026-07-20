@@ -1,0 +1,17 @@
+{{- if .Values.orceFlowDeploy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "facis-industrial-ingestion.fullname" . }}-orce-flows
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-industrial-ingestion.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orce-flows
+data:
+{{- $flowsDir := .Values.orceFlowDeploy.flowsDir | default "orce-flows" }}
+{{- $glob := printf "files/%s/*.json" $flowsDir }}
+{{- range $path, $bytes := .Files.Glob $glob }}
+  {{ base $path | quote }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}

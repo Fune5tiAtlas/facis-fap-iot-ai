@@ -1,0 +1,6 @@
+apiVersion: v2
+name: facis-industrial-ingestion
+description: Industrial Ingestion Pattern reference flows (OPC UA + Modbus TCP) for the FACIS FAP IoT & AI platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,108 @@
+{{- if .Values.orceFlowDeploy.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "facis-industrial-ingestion.fullname" . }}-orce-flow-deploy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-industrial-ingestion.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orce-flow-deploy
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "facis-industrial-ingestion.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: orce-flow-deploy
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "facis-industrial-ingestion.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      volumes:
+        - name: flows
+          configMap:
+            name: {{ include "facis-industrial-ingestion.fullname" . }}-orce-flows
+      containers:
+        - name: deploy
+          image: "{{ .Values.orceFlowDeploy.jobImage.repository }}:{{ .Values.orceFlowDeploy.jobImage.tag }}"
+          imagePullPolicy: {{ .Values.orceFlowDeploy.jobImage.pullPolicy }}
+          env:
+            - name: ORCE_ADMIN_URL
+              value: {{ .Values.orceFlowDeploy.orceAdminUrl | quote }}
+            - name: ORCE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.orceFlowDeploy.adminTokenSecret }}
+                  key: token
+            - name: PRE_DEPLOY_SLEEP
+              value: {{ .Values.orceFlowDeploy.preDeploySleepSeconds | quote }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "[orce-flow-deploy] waiting ${PRE_DEPLOY_SLEEP}s for ORCE readiness..."
+              sleep "${PRE_DEPLOY_SLEEP}"
+
+              cd /flows
+              jq -s 'add' *.json > /tmp/ours.json
+
+              # Merge-safe deploy: replace only this service's tabs/subflows,
+              # keep every other service's flows on the shared ORCE runtime.
+              if curl -sS --fail \
+                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                "${ORCE_ADMIN_URL}/flows" > /tmp/current.json; then
+                echo "[orce-flow-deploy] merging into existing flow set"
+              else
+                echo "[orce-flow-deploy] GET /flows failed; assuming empty runtime"
+                echo '[]' > /tmp/current.json
+              fi
+
+              jq -s '
+                (.[0] | if type == "object" and has("flows") then .flows else . end) as $current
+                | .[1] as $ours
+                | ($ours | map(.id)) as $ourIds
+                | ($ours | map(select(.type == "tab" or .type == "subflow") | .id)) as $ourScopes
+                | ($current | map(select(
+                    ((.id) as $i | $ourIds | index($i) | not)
+                    and (((.z // "")) as $z | $ourScopes | index($z) | not)
+                  ))) + $ours
+              ' /tmp/current.json /tmp/ours.json > /tmp/combined.json
+
+              echo "[orce-flow-deploy] POST ${ORCE_ADMIN_URL}/flows ($(wc -c </tmp/combined.json) bytes)"
+              curl -sS --fail \
+                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -H "Node-RED-Deployment-Type: full" \
+                -X POST "${ORCE_ADMIN_URL}/flows" \
+                --data @/tmp/combined.json
+
+              echo
+              echo "[orce-flow-deploy] deploy ok"
+          volumeMounts:
+            - name: flows
+              mountPath: /flows
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+{{- end }}

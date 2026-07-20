@@ -1,0 +1,3 @@
+# Synced flow files — populated by ../../sync-flows.sh
+# Do not commit
+*.json

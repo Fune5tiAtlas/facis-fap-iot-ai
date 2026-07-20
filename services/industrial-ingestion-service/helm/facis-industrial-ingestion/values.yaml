@@ -1,0 +1,82 @@
+# =============================================================================
+# FACIS Industrial Ingestion Service — Helm Values
+# =============================================================================
+# ORCE-only service: this chart ships no workload of its own. It renders the
+# flow ConfigMap + a post-install Job that merge-deploys the flows onto the
+# shared ORCE pod, plus the env Secret those flows read.
+
+# ---------------------------------------------------------------------------
+# ORCE Flow Deployment
+# ---------------------------------------------------------------------------
+orceFlowDeploy:
+  enabled: true
+  orceAdminUrl: http://facis-orce.orce.svc.cluster.local:1880
+  adminTokenSecret: facis-orce-admin
+  flowsDir: orce-flows
+  jobImage:
+    repository: alpine/curl
+    tag: "8.10.1"
+    pullPolicy: IfNotPresent
+  preDeploySleepSeconds: 5
+
+# ---------------------------------------------------------------------------
+# ORCE Pod Environment
+# ---------------------------------------------------------------------------
+# The flows read every setting via env.get() / ${VAR} substitution. The env
+# vars must be set on the ORCE pod, not on this chart's (non-existent)
+# Deployment. This block renders a single Secret consumed by the ORCE chart
+# via `extraEnvFrom: [secretRef: <name>]` — same pattern as facis-sftp-orce-env.
+orcePodEnv:
+  renderSecret: true
+  secretName: facis-industrial-orce-env
+
+# ---------------------------------------------------------------------------
+# Modbus TCP source
+# ---------------------------------------------------------------------------
+# Defaults point at the simulation fixture (Modbus server flow on the same
+# ORCE pod, port 5020). Point host/port/unitId at a real PLC to ingest from
+# production hardware — no flow change needed.
+modbus:
+  host: 127.0.0.1
+  port: 5020
+  unitId: 1
+  pollMs: 5000
+  baseAddress: 19000
+  deviceId: janitza-umg96rm-001
+  ingestTopic: modbus.ingest.raw
+
+# ---------------------------------------------------------------------------
+# OPC UA source
+# ---------------------------------------------------------------------------
+# Defaults point at the simulation fixture (OPC UA demo server flow on the
+# same ORCE pod, port 4840, SecurityPolicy None + anonymous).
+opcua:
+  endpoint: opc.tcp://127.0.0.1:4840
+  pollMs: 5000
+  nodePrefix: "ns=1;s=FACIS.EnergyMeter."
+  deviceId: janitza-umg96rm-001
+  ingestTopic: opcua.ingest.raw
+
+# ---------------------------------------------------------------------------
+# Ingestion
+# ---------------------------------------------------------------------------
+ingest:
+  siteId: site-001
+  dlqTopic: industrial.ingest.dlq
+
+# ---------------------------------------------------------------------------
+# Kafka
+# ---------------------------------------------------------------------------
+# Full broker list for the FACIS Stackable cluster (mTLS certs are mounted
+# on the ORCE pod at /etc/kafka-certs by infrastructure/orce).
+kafka:
+  brokers: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
