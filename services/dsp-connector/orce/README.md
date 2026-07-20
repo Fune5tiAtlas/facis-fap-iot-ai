@@ -166,7 +166,7 @@ with no obvious cause.
 ### Live deploy checklist (requires live cluster access — not automated)
 
 ```bash
-export KUBECONFIG=/Users/danielpires/Developer/Ciberseg/Atlas/k8s/K8s-cluster-IONOS-cloud.yaml
+export KUBECONFIG=k8s/K8s-cluster-IONOS-cloud.yaml
 
 # 1. Provision Bronze + NiFi (additive, does not touch the 9 live sim flows)
 cd services/simulation
@@ -235,7 +235,7 @@ honestly:
 ### Live verification (requires live cluster access — not automated)
 
 ```bash
-export KUBECONFIG=/Users/danielpires/Developer/Ciberseg/Atlas/k8s/K8s-cluster-IONOS-cloud.yaml
+export KUBECONFIG=k8s/K8s-cluster-IONOS-cloud.yaml
 
 # 1. Deploy the updated flows + the fixed DSP_KAFKA_BOOTSTRAP default
 cd services/dsp-connector/helm/facis-dsp-connector

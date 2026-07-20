@@ -108,5 +108,4 @@ kubectl logs job/kafka-broker-watcher-now -n orce
 
 ## Related
 
-- Memory plan: `.claude/plans/graceful-tumbling-honey.md`
 - Existing migration: `services/simulation/docs/orce-runtime/migration-guide.md`

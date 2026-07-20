@@ -178,32 +178,80 @@ kubectl create job --from=cronjob/kafka-cert-expiry-check \
 kubectl logs job/kafka-cert-expiry-now -n orce
 ```
 
-**Manual rotation procedure:** auto-rotation isn't implemented (we don't
-have admin access to the Stackable cluster from IONOS). When the alert
-fires:
+**Manual rotation procedure — self-service.** This requires `cluster-admin`
+access to the Stackable cluster (ask the FACIS Stackable owners for a
+kubeconfig if you don't already have one) — rotation doesn't require
+waiting on another team to extract the cert for you:
 
-1. Obtain a fresh cert bundle from the FACIS Stackable owners — they
-   extract from their `kubectl -n stackable get secret <kafka-tls-secret>`
-   and update `Credentials and configs/credentials.txt` in the shared
-   FACIS repo. Confirm the new `tls.crt`'s `notAfter` is reasonable.
-2. Extract the three PEM blocks from `credentials.txt` to local files
-   (`ca.crt`, `tls.crt`, `tls.key`); validate the chain:
+1. Mint a fresh client cert directly, using the same `tls` SecretClass the
+   Kafka brokers themselves use (`kubectl get secretclass tls -o yaml` on
+   the Stackable cluster shows `maxCertificateLifetime: 90d` — use the
+   full 90d). With `kubectl` context pointed at the Stackable cluster:
+   ```bash
+   cat <<'EOF' | kubectl apply -f -
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: facis-kafka-cert-mint
+     namespace: stackable
+   spec:
+     containers:
+       - name: holder
+         image: busybox:1.36
+         command: ["sleep", "600"]
+         volumeMounts:
+           - name: tls-cert
+             mountPath: /certs
+     volumes:
+       - name: tls-cert
+         ephemeral:
+           volumeClaimTemplate:
+             metadata:
+               annotations:
+                 secrets.stackable.tech/class: "tls"
+                 secrets.stackable.tech/format: "tls-pem"
+                 secrets.stackable.tech/scope: "pod"
+                 secrets.stackable.tech/backend.autotls.cert.lifetime: "90d"
+             spec:
+               accessModes: ["ReadWriteOnce"]
+               resources: { requests: { storage: "1" } }
+               storageClassName: secrets.stackable.tech
+               volumeMode: Filesystem
+     restartPolicy: Never
+   EOF
+   kubectl wait --for=condition=Ready pod/facis-kafka-cert-mint -n stackable --timeout=60s
+   kubectl exec facis-kafka-cert-mint -n stackable -- cat /certs/ca.crt  > ca.crt
+   kubectl exec facis-kafka-cert-mint -n stackable -- cat /certs/tls.crt > tls.crt
+   kubectl exec facis-kafka-cert-mint -n stackable -- cat /certs/tls.key > tls.key
+   kubectl delete pod facis-kafka-cert-mint -n stackable
+   ```
+   The CA is the cluster's existing self-signed root (issuer
+   `secret-operator self-signed`) — confirm the new `ca.crt`'s SHA-256
+   fingerprint matches the currently-deployed one (`openssl x509 -in ca.crt
+   -noout -fingerprint -sha256`) before trusting the mint; if it doesn't,
+   the CA itself was rotated and every other Kafka client cert (SFTP,
+   simulation, DSP consumer) needs the same treatment, not just this one.
+2. Validate the chain before deploying it:
    ```bash
    openssl verify -CAfile ca.crt tls.crt
-   # cert + key modulus match
    diff <(openssl x509 -modulus -noout -in tls.crt) \
         <(openssl rsa  -modulus -noout -in tls.key)
    ```
-3. Replace the Secret:
+3. Share the new PEM blocks through your existing credential-sharing
+   process (so the next person doesn't have to re-mint), then replace the
+   Secret on the IONOS cluster:
    ```bash
+   export KUBECONFIG=k8s/K8s-cluster-IONOS-cloud.yaml
    kubectl create secret generic facis-kafka-certs -n orce \
      --from-file=ca.crt=ca.crt \
      --from-file=tls.crt=tls.crt \
      --from-file=tls.key=tls.key \
      --dry-run=client -o yaml | kubectl apply -f -
    ```
-4. Restart the ORCE pod so it picks up the new cert via the projected
-   Secret mount:
+4. Restart the ORCE pod — a Secret volume update refreshes the file
+   on disk within ~60-90s, but the already-running rdkafka producer/
+   consumer clients cache their SSL context at creation time and will
+   keep failing against the old (now-replaced) cert until restarted:
    ```bash
    kubectl rollout restart deployment/orce -n orce
    kubectl rollout status  deployment/orce -n orce
@@ -214,6 +262,11 @@ fires:
    ```
    Expect 9 `Producer ready` lines (one per topic). Confirm message
    delivery with `kcat -t sim.smart_energy.meter -C -o end -e -c 1`.
+
+**Fallback if Stackable cluster access is ever lost:** ask the FACIS
+Stackable owners to extract from `kubectl -n stackable get secret
+<kafka-tls-secret>` instead and share the PEM blocks through your
+existing credential-sharing process.
 
 **Permanent fix follow-ups:** `cert-manager`-issued client certs (issued
 on the IONOS side, accepted as a CA by Stackable), or a shared cert store
@@ -240,11 +293,14 @@ Admin API, and re-renders + redeploys if the drift is stable for 2
 consecutive checks. The "stable for 2" rule prevents flapping during
 Stackable rolling restarts (when each broker briefly disappears).
 
-**Force-trigger the watcher:**
+**Force-trigger the watcher:** the CronJob runs as two containers — a
+`discover` init container (kcat) and a `watcher` main container (curl+jq)
+— see `infrastructure/README.md` for why. Check both:
 ```bash
 kubectl create job --from=cronjob/kafka-broker-watcher \
   kafka-broker-watcher-now -n orce
-kubectl logs job/kafka-broker-watcher-now -n orce
+kubectl logs job/kafka-broker-watcher-now -n orce -c discover
+kubectl logs job/kafka-broker-watcher-now -n orce -c watcher
 # Expected: structured JSON line with msg="no drift" or
 # msg="drift detected, awaiting confirmation next cycle".
 ```

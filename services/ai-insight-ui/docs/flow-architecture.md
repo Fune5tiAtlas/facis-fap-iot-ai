@@ -168,6 +168,6 @@ services/reducers.ts:
 
 ## Reference
 
-- **FAP General Guideline**: `/Users/danielpires/Developer/Ciberseg/Atlas/guidelines and examples/FAP_UI_General_Guideline_Reference_Aligned.md`
+- **FAP General Guideline**: `guidelines and examples/FAP_UI_General_Guideline_Reference_Aligned.md`
 - **Architecture decision**: `docs/architecture-decisions/ADR-001-pure-uibuilder-fap-aligned.md`
 - **Operator scripts**: `scripts/README.md` (deploy, smoke tests, drift checks, FAP-token CI gate)

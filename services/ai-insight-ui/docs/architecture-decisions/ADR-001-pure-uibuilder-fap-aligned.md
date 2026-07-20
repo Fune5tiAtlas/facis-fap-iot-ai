@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-05-04
 - **Drivers:** Hossein's PR review of `feature/orce-native-simulation-runtime` (sections A.1, A.3, B.1, C.1, C.2, C.3); FAP General Guideline standard.
-- **Reference:** `/Users/danielpires/Developer/Ciberseg/Atlas/guidelines and examples/FAP_UI_General_Guideline_Reference_Aligned.md`
+- **Reference:** `guidelines and examples/FAP_UI_General_Guideline_Reference_Aligned.md`
 
 ## Context
 
@@ -98,6 +98,4 @@ surfaces that survive on the SPA's served origin are:
 ## Verification
 
 End-to-end verification is run after each PR lands and comprehensively after
-PR-7. The plan file at `/Users/danielpires/.claude/plans/we-need-to-plan-prancy-kurzweil.md`
-holds the complete verification checklist, including FAP General Guideline
-§19 final checklist.
+PR-7, including the FAP General Guideline §19 final checklist.

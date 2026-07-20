@@ -204,7 +204,7 @@ Provide at least one user with Trino access:
 | Item | Value |
 |---|---|
 | Username | (e.g., `test`) |
-| Password | (e.g., `TestUser#12345`) |
+| Password | (a strong, unique password — provide via `FACIS_OIDC_PASSWORD`, do not commit it anywhere) |
 | Realm roles | Must allow Trino query execution |
 
 ### 7.3 Items to Provide to ATLAS
@@ -271,7 +271,7 @@ scripts/provision_nifi_jdbc.sh --direct
 # 4. Configure NiFi Kafka→Bronze pipeline (36 processors)
 python scripts/setup_nifi.py --env-file .env.cluster
 
-# 5. Deploy simulation service (Helm or Docker Compose)
+# 5. Deploy simulation service (Helm)
 helm install facis-sim ./helm/facis-simulation -n facis --create-namespace
 
 # 6. Validate end-to-end

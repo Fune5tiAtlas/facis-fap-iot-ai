@@ -4,7 +4,7 @@
 # nifi-jdbc-podoverride.yaml mount.
 #
 # Steps:
-#   1. Get an OIDC bearer token from Keycloak (test/TestUser#12345).
+#   1. Get an OIDC bearer token from Keycloak.
 #   2. Stop every processor that references the controller service.
 #   3. Disable the controller service.
 #   4. Update properties.database-driver-locations.
@@ -16,7 +16,8 @@
 # Usage:
 #   bash infrastructure/stackable/restore-trino-jdbc-pool.sh
 #
-# Requires: kubectl auth to read /Users/danielpires/Developer/Ciberseg/Atlas/Credentials and configs/credentials.txt for fallbacks
+# Requires: kubectl auth to the Stackable cluster; KC_USER/KC_PASS/
+# KC_CLIENT_SECRET from your credential store (no defaults — see below)
 set -euo pipefail
 
 NIFI_BASE="${NIFI_BASE:-https://212.132.83.82:8443}"
@@ -24,13 +25,20 @@ SVC_ID="${SVC_ID:-62a9f79e-019d-1000-ffff-ffffd500f838}"
 NEW_DRIVER_PATH="${NEW_DRIVER_PATH:-file:///stackable/userdata/jdbc/trino-jdbc-467.jar}"
 
 KC_BASE="${KC_BASE:-https://identity.facis.cloud}"
-KC_USER="${KC_USER:-test}"
-KC_PASS="${KC_PASS:-TestUser#12345}"
 KC_CLIENT_ID="${KC_CLIENT_ID:-OIDC}"
-KC_CLIENT_SECRET="${KC_CLIENT_SECRET:-pa0nSc7Pmu0g1RJK1zZNJiXir5AfcDwf}"
 
 log()  { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 api()  { curl -sSk -H "Authorization: Bearer $TOKEN" "$@"; }
+
+require_var() {
+  if [ -z "${!1:-}" ]; then
+    echo "Missing required env var: $1" >&2
+    exit 2
+  fi
+}
+require_var KC_USER
+require_var KC_PASS
+require_var KC_CLIENT_SECRET
 
 log "1. Getting Keycloak OIDC token (user=$KC_USER)..."
 TOKEN=$(curl -sSk -X POST "$KC_BASE/realms/facis/protocol/openid-connect/token" \
