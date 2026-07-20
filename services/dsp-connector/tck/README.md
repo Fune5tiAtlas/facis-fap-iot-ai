@@ -32,23 +32,25 @@ now typed DSP 2025-1 objects; see `orce/tests/flows/dsp-error-binding.spec.js`).
    `./gradlew genTestPlan` from the dsp-tck repo if the QA wants the
    ID→spec-flow table.
 
-## Conformance gap register (expected failures today)
+## Conformance gap register
 
-The error-binding precondition is fixed, but a 100% pass additionally
-requires binding-level conformance that is **not yet implemented**. Known
-gaps, in dependency order:
+The error-binding precondition is fixed. Gaps 1 and 5 (the provider binding
+surface and the catalog JSON-LD shape) are now **implemented**; gaps 2–4 have a
+recorded scope decision in `SCOPE-RULING.md`. Per-gap disposition:
 
-| # | Gap | TCK impact | Notes |
+| # | Gap | Status | Notes |
 |---|---|---|---|
-| 1 | Transfer binding paths: TCK drives `POST <base>/transfers/request`, `GET /transfers/:providerPid`, `POST /transfers/:providerPid/{start,completion,termination,suspension}`; FACIS exposes `POST /dsp/transfers`, `GET/POST /dsp/transfers/:id[/suspend|/terminate]` | All `TP_*` provider tests | Needs alias endpoints + message-type handling (TransferRequestMessage etc.) |
-| 2 | Creation ACK: binding requires **201** with a `TransferProcess` ACK object; FACIS returns 202 `{transferId}` (SRS §7.1.3 documents 202 — requirement-set conflict, see NF-11) | `TP_01_*` | PMO ruling or dual-surface |
-| 3 | Async DSP callback messages to the TCK's connector (`callback.address`) are not sent by FACIS | `TP_02_*`/`TP_03_*` state tests | Transfer FSM is synchronous today |
-| 4 | Consumer-role tests (`TP_C`, selected by the same `dsp-tp` tag) need the bespoke `transfer.initiate.url` webhook | `TP_C_*` | No provider-only tag exists in TCK 1.0.1; accept these failures or embed via JUnit with a custom filter |
-| 5 | Catalog response shape: TCK validates the 2025-1 `Catalog`/`Dataset` JSON-LD schemas; FACIS returns its own `{datasets, nextCursor}` shape | `CAT_*` | `/.well-known/dspace-version` and `GET /dsp/catalog/datasets/:id` + `POST /dsp/catalog/request` alias are now in place; the response-shape mapping remains |
+| 1 | Transfer binding paths: TCK drives `POST <base>/transfers/request`, `GET /transfers/:providerPid`, `POST /transfers/:providerPid/{start,completion,termination,suspension}` | **Implemented** | DSP-canonical alias endpoints map onto the existing FSM (translation surface, not a second state machine): `TransferRequestMessage` → create → `TransferProcess` ACK; `GET /:providerPid` returns a `TransferProcess`; `termination`/`suspension`/`start`/`completion` move state. FACIS `POST /dsp/transfers`, `GET/POST /dsp/transfers/:id[/suspend|/terminate]` still work unchanged. Spec: `orce/tests/flows/dsp-transfer-binding.spec.js`. |
+| 2 | Creation ACK: binding requires **201**; FACIS returns 202 `{transferId}` (SRS §7.1.3 documents 202) | **PMO ruling** | Requirement-set conflict; code deliberately left at 202. See `SCOPE-RULING.md` → NF-11. The binding response body is a correct `TransferProcess` ACK; only the status code differs. |
+| 3 | Async DSP callback messages to `callback.address` are not sent by FACIS | **Accepted deviation** | Transfer FSM is synchronous by design. See `SCOPE-RULING.md` → deviation D-5. |
+| 4 | Consumer-role tests (`TP_C`, same `dsp-tp` tag) need the bespoke `transfer.initiate.url` webhook | **Accepted deviation** | FACIS is a provider connector here. See `SCOPE-RULING.md` → deviation D-5. |
+| 5 | Catalog response shape: 2025-1 `Catalog`/`Dataset` JSON-LD | **Implemented** | `POST /dsp/catalog/request` now returns a `dcat:Catalog` of `dcat:Dataset` entries (`@context`/`@type`/`@id`, `dcat:distribution`, `odrl:hasPolicy`); FACIS `POST /dsp/catalogue/request` keeps its `{datasets, nextCursor}` shape. `/.well-known/dspace-version` and `GET /dsp/catalog/datasets/:id` also in place. Spec: `orce/tests/flows/dsp-catalog-binding.spec.js`. |
 
-**Bottom line for the QA session:** the NF-7 *precondition* (typed error
-payloads per DSP 2025-1) is implemented and spec-guarded; the TCK harness is
-ready to produce the evidence log; the remaining gaps above are the
-"dual DSP implementation" deviation already named in the QA report (NF-15
-deviation register) and need either implementation or a recorded scope
-decision before a 100% run is achievable.
+**Bottom line for the QA session:** the NF-7 precondition (typed error payloads
+per DSP 2025-1) and the provider binding surface (gaps 1, 5) are implemented and
+spec-guarded; the TCK harness is ready to produce the evidence log. The residual
+failures are bounded and documented in `SCOPE-RULING.md`: one PMO requirement
+conflict (gap 2 / NF-11) and two accepted demonstrator-scope deviations (gaps
+3–4 / deviation D-5). A 100% run is not achievable until the PMO resolves the
+201-vs-202 conflict and the async-callback / consumer-role scope is funded or the
+suite is filtered to the provider-synchronous subset.
