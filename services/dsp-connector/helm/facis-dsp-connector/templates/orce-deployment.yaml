@@ -89,7 +89,12 @@ spec:
               PKGS="node-red-contrib-rdkafka jose@5.10.0 jsonld@9.0.0 @gaia-x/json-web-signature-2020@2.3.0 node-red-contrib-mongodb4@3.4.0 pg@8.13.1"
               MISSING=""
               for p in $PKGS; do
-                if [ ! -d "node_modules/$p" ]; then MISSING="$MISSING $p"; fi
+                # Strip a trailing @version so pinned entries resolve to their
+                # install dir (last-@ strip keeps @scoped/name prefixes intact;
+                # the guard covers unpinned @scoped names).
+                name="${p%@*}"
+                [ -z "$name" ] && name="$p"
+                if [ ! -d "node_modules/$name" ]; then MISSING="$MISSING $p"; fi
               done
 
               # Detect whether the existing librdkafka was built with OpenSSL.
