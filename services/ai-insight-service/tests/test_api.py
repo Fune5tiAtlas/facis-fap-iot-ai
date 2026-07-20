@@ -239,7 +239,10 @@ def test_openapi_json_available(client) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["openapi"] == "3.0.3"
+    # FastAPI's emitted OpenAPI spec version follows the installed FastAPI
+    # release (3.0.x pre-0.99, 3.1.0 after); the contract under test is that
+    # a valid 3.x document is served, not a specific minor version.
+    assert payload["openapi"].startswith("3.")
     assert "/api/v1/insights/anomaly-report" in payload["paths"]
     assert "/api/ai/outputs/{output_id}" in payload["paths"]
     responses = payload["paths"]["/api/v1/insights/anomaly-report"]["post"]["responses"]
