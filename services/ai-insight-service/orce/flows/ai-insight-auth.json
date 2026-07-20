@@ -1,0 +1,109 @@
+[
+  {
+    "id": "tab_ai_insight_auth",
+    "type": "tab",
+    "label": "ai-insight-auth",
+    "disabled": false,
+    "info": "AI Insight — Token Verify (NF-6)\n\nShared Keycloak access-token verifier, reached via link call from every\nAI Insight HTTP endpoint. Closes the header-trust model: identity (roles,\nsubject) derives exclusively from a cryptographically verified JWT;\nclient-supplied x-user-roles headers are never trusted.\n\nPipeline: prep (Bearer extract, issuer check, JWKS cache) ->\n[http request GET JWKS on cache miss] -> jose.jwtVerify (signature, exp,\nissuer, optional audience) -> msg.identity { sub, username, client,\nroles: realm_access.roles }.\n\nFailure semantics: 401 + WWW-Authenticate for missing/malformed/expired/\ninvalid tokens; 503 when the JWKS endpoint is unreachable (fail closed).\nAuthorization decisions (403) stay in the per-endpoint policy nodes.\n\nEnvironment:\n  AI_INSIGHT_AUTH__MODE        enforce (default) | off (dev-only legacy headers)\n  AI_INSIGHT_AUTH__ISSUER      default: FACIS_KEYCLOAK_URL\n  AI_INSIGHT_AUTH__JWKS_URL    default: <issuer>/protocol/openid-connect/certs\n  AI_INSIGHT_AUTH__AUDIENCE    optional aud check\n  AI_INSIGHT_AUTH__JWKS_TTL_SECONDS  JWKS cache TTL (default 300)"
+  },
+  {
+    "id": "aiinsight_auth_verify_in",
+    "type": "link in",
+    "z": "tab_ai_insight_auth",
+    "name": "← aiinsight.auth (call)",
+    "links": [],
+    "x": 120,
+    "y": 120,
+    "wires": [
+      [
+        "fn_auth_prep"
+      ]
+    ]
+  },
+  {
+    "id": "fn_auth_prep",
+    "type": "function",
+    "z": "tab_ai_insight_auth",
+    "name": "prep + JWKS cache check",
+    "func": "const authError = (code, detail) => ({\n    statusCode: 401,\n    headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer error=\"' + code + '\"' },\n    payload: { detail }\n});\n\nconst mode = String(env.get('AI_INSIGHT_AUTH__MODE') || 'enforce').toLowerCase();\nmsg._authMode = mode;\nif (mode === 'off') {\n    msg.identity = null;\n    msg.authRejected = false;\n    node.warn('ai-insight-auth: AI_INSIGHT_AUTH__MODE=off — header-derived roles (dev only)');\n    return [null, null, msg];\n}\n\nconst authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || '';\nconst m = /^Bearer\\s+(.+)$/i.exec(authHeader.trim());\nif (!m) {\n    Object.assign(msg, authError('missing_authorization', 'Authorization: Bearer <access token> is required'));\n    msg.identity = null;\n    msg.authRejected = true;\n    return [null, null, msg];\n}\nconst token = m[1];\n\nlet header;\nlet payload;\ntry {\n    const parts = token.split('.');\n    if (parts.length !== 3) throw new Error('not a JWS');\n    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));\n    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));\n} catch (e) {\n    Object.assign(msg, authError('invalid_token', 'malformed bearer token'));\n    msg.identity = null;\n    msg.authRejected = true;\n    return [null, null, msg];\n}\n\nconst issuer = env.get('AI_INSIGHT_AUTH__ISSUER') || env.get('FACIS_KEYCLOAK_URL') || 'https://identity.facis.cloud/realms/facis';\nif (payload.iss !== issuer) {\n    Object.assign(msg, authError('invalid_token', 'unexpected token issuer'));\n    msg.identity = null;\n    msg.authRejected = true;\n    return [null, null, msg];\n}\n\nmsg._authToken = token;\nmsg._authKid = header.kid || null;\nmsg._authIssuer = issuer;\nmsg._authOrigPayload = msg.payload;\n\nconst ttlMs = Math.max(60, Number(env.get('AI_INSIGHT_AUTH__JWKS_TTL_SECONDS') || 300)) * 1000;\nconst cache = global.get('aiInsightAuthJwksCache');\nconst kidInCache = cache && Array.isArray(cache.keys)\n    && (!msg._authKid || cache.keys.some((k) => k.kid === msg._authKid));\nif (cache && (Date.now() - cache.fetchedAt) < ttlMs && kidInCache) {\n    msg._authJwks = { keys: cache.keys };\n    return [msg, null, null];\n}\n\nmsg.url = env.get('AI_INSIGHT_AUTH__JWKS_URL') || (issuer + '/protocol/openid-connect/certs');\nmsg._authJwksFetched = true;\nreturn [null, msg, null];\n",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 330,
+    "y": 120,
+    "wires": [
+      [
+        "fn_auth_verify"
+      ],
+      [
+        "http_jwks_fetch"
+      ],
+      [
+        "aiinsight_auth_return"
+      ]
+    ]
+  },
+  {
+    "id": "http_jwks_fetch",
+    "type": "http request",
+    "z": "tab_ai_insight_auth",
+    "name": "GET JWKS (Keycloak)",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 560,
+    "y": 160,
+    "wires": [
+      [
+        "fn_auth_verify"
+      ]
+    ]
+  },
+  {
+    "id": "fn_auth_verify",
+    "type": "function",
+    "z": "tab_ai_insight_auth",
+    "name": "verify JWT (jose)",
+    "func": "// jose is in scope from this node's own libs declaration\n// (functionExternalModules injects it as a bound variable).\n(async () => {\n    const authError = (code, detail) => ({\n        statusCode: 401,\n        headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer error=\"' + code + '\"' },\n        payload: { detail }\n    });\n    try {\n        let jwksDoc;\n        if (msg._authJwksFetched) {\n            const status = Number(msg.statusCode || 0);\n            jwksDoc = msg.payload;\n            if (status !== 200 || !jwksDoc || !Array.isArray(jwksDoc.keys)) {\n                msg.statusCode = 503;\n                msg.headers = { 'Content-Type': 'application/json' };\n                msg.payload = { detail: 'Authorization server unavailable (JWKS fetch failed)' };\n                msg.identity = null;\n                msg.authRejected = true;\n                node.send(msg);\n                return;\n            }\n            global.set('aiInsightAuthJwksCache', { keys: jwksDoc.keys, fetchedAt: Date.now() });\n        } else {\n            jwksDoc = msg._authJwks;\n        }\n\n        msg.payload = msg._authOrigPayload;\n\n        const kid = msg._authKid;\n        const jwk = jwksDoc.keys.find((k) => !kid || k.kid === kid);\n        if (!jwk) {\n            Object.assign(msg, authError('invalid_token', 'unknown signing key'));\n            msg.identity = null;\n            msg.authRejected = true;\n            node.send(msg);\n            return;\n        }\n\n        const key = await jose.importJWK(jwk, jwk.alg || 'RS256');\n        const opts = { issuer: msg._authIssuer, clockTolerance: 5 };\n        const audience = env.get('AI_INSIGHT_AUTH__AUDIENCE');\n        if (audience) opts.audience = audience;\n\n        const verified = await jose.jwtVerify(msg._authToken, key, opts);\n        const claims = verified.payload;\n        const roles = (claims.realm_access && Array.isArray(claims.realm_access.roles))\n            ? claims.realm_access.roles\n            : [];\n        msg.identity = {\n            sub: claims.sub || null,\n            username: claims.preferred_username || null,\n            client: claims.azp || null,\n            roles,\n            verifiedAt: new Date().toISOString()\n        };\n        msg.authRejected = false;\n        delete msg.statusCode;\n    } catch (e) {\n        if (e && e.code === 'ERR_JWT_EXPIRED') {\n            Object.assign(msg, authError('token_expired', 'access token expired'));\n        } else if (e && e.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {\n            Object.assign(msg, authError('invalid_token', 'token claim validation failed: ' + (e.claim || 'unknown')));\n        } else {\n            Object.assign(msg, authError('invalid_token', 'token signature verification failed'));\n        }\n        msg.identity = null;\n        msg.authRejected = true;\n    }\n    delete msg._authToken;\n    delete msg._authKid;\n    delete msg._authIssuer;\n    delete msg._authJwks;\n    delete msg._authJwksFetched;\n    delete msg._authOrigPayload;\n    node.send(msg);\n    node.done();\n})();\nreturn;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "jose",
+        "module": "jose"
+      }
+    ],
+    "x": 790,
+    "y": 120,
+    "wires": [
+      [
+        "aiinsight_auth_return"
+      ]
+    ]
+  },
+  {
+    "id": "aiinsight_auth_return",
+    "type": "link out",
+    "z": "tab_ai_insight_auth",
+    "name": "return to caller",
+    "mode": "return",
+    "links": [],
+    "x": 990,
+    "y": 120,
+    "wires": []
+  }
+]

@@ -11,25 +11,44 @@
     "type": "link in",
     "z": "tab_aiui_integrations",
     "name": "← from UI (integrations)",
-    "links": ["link-to-integrations"],
+    "links": [
+      "link-to-integrations"
+    ],
     "x": 140,
     "y": 100,
-    "wires": [["fn_int_probe"]]
+    "wires": [
+      [
+        "fn_int_probe"
+      ]
+    ]
   },
   {
     "id": "fn_int_probe",
     "type": "function",
     "z": "tab_aiui_integrations",
     "name": "probe & aggregate",
-    "func": "const action = msg._req && msg._req.action;\nif (action !== 'integrations.health') {\n    msg._result = { ok: false, errors: { action: 'integrations: unknown action: ' + action } };\n    return msg;\n}\n\n// httpsFetch shim — function-node sandbox lacks global fetch. Uses Node stdlib.\nfunction httpsFetch(urlStr, opts = {}) {\n    return new Promise((resolve, reject) => {\n        let parsed;\n        try { parsed = new urlmod.URL(urlStr); }\n        catch (e) { return reject(new Error('bad URL: ' + urlStr)); }\n        const isHttps = parsed.protocol === 'https:';\n        const lib = isHttps ? https : http;\n        const body = opts.body;\n        const headers = Object.assign({}, opts.headers || {});\n        if (body && !headers['Content-Length']) headers['Content-Length'] = Buffer.byteLength(body);\n        const req = lib.request({\n            method: opts.method || 'GET',\n            hostname: parsed.hostname,\n            port: parsed.port || (isHttps ? 443 : 80),\n            path: parsed.pathname + (parsed.search || ''),\n            headers,\n            timeout: opts.timeoutMs || 5000,\n            rejectUnauthorized: opts.rejectUnauthorized !== false\n        }, (res) => {\n            let data = '';\n            res.on('data', (c) => { data += c; });\n            res.on('end', () => resolve({\n                ok: res.statusCode >= 200 && res.statusCode < 300,\n                status: res.statusCode\n            }));\n        });\n        req.on('error', reject);\n        req.on('timeout', () => { req.destroy(new Error('timeout')); });\n        if (body) req.write(body);\n        req.end();\n    });\n}\n\nconst trinoScheme = env.get('AI_INSIGHT_TRINO__HTTP_SCHEME') || 'https';\nconst trinoHost   = env.get('AI_INSIGHT_TRINO__HOST');\nconst trinoPort   = env.get('AI_INSIGHT_TRINO__PORT') || 8443;\nconst nifiBase    = env.get('FACIS_NIFI_BASE') || 'https://212.132.83.82:8443';\nconst kafkaBoot   = env.get('FACIS_KAFKA_BROKERS') || env.get('DSP_KAFKA_BOOTSTRAP') || '';\n\nfunction withTimeout(promise, ms) {\n    return Promise.race([\n        promise,\n        new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout ${ms}ms`)), ms))\n    ]);\n}\n\nasync function probe(name, url, opts = {}) {\n    const start = Date.now();\n    try {\n        const res = await withTimeout(\n            httpsFetch(url, { method: opts.method || 'GET', headers: opts.headers }),\n            opts.timeoutMs || 3000\n        );\n        const ms = Date.now() - start;\n        return { service: name, url, status: res.ok ? 'healthy' : 'degraded', http_status: res.status, latency_ms: ms };\n    } catch (e) {\n        return { service: name, url, status: 'unreachable', error: String(e.message || e), latency_ms: Date.now() - start };\n    }\n}\n\nconst tasks = [\n    probe('orce',       'http://localhost:1880/api/v1/health'),\n    probe('ai-insight', 'http://localhost:1880/api/v1/health',\n          { headers: { 'x-agreement-id': 'integrations-probe', 'x-asset-id': 'facis-platform', 'x-user-roles': 'ai_insight_consumer' } })\n];\nif (trinoHost) tasks.push(probe('trino', `${trinoScheme}://${trinoHost}:${trinoPort}/v1/info`));\ntasks.push(probe('nifi', `${nifiBase}/nifi-api/flow/about`));\n\nconst results = await Promise.all(tasks);\n\nconst kafkaBrokers = kafkaBoot ? kafkaBoot.split(',').map(s => s.trim()).filter(Boolean) : [];\nresults.push({\n    service: 'kafka', url: null,\n    status: kafkaBrokers.length ? 'configured' : 'unconfigured',\n    brokers: kafkaBrokers, broker_count: kafkaBrokers.length, latency_ms: null\n});\n\nconst summary = {\n    healthy:     results.filter(r => r.status === 'healthy').length,\n    degraded:    results.filter(r => r.status === 'degraded').length,\n    unreachable: results.filter(r => r.status === 'unreachable').length,\n    configured:  results.filter(r => r.status === 'configured').length,\n    total:       results.length\n};\n\nmsg._result = { ok: true, data: { generated_at: new Date().toISOString(), summary, services: results } };\nreturn msg;\n",
+    "func": "const action = msg._req && msg._req.action;\nif (action !== 'integrations.health') {\n    msg._result = { ok: false, errors: { action: 'integrations: unknown action: ' + action } };\n    return msg;\n}\n\n// httpsFetch shim — function-node sandbox lacks global fetch. Uses Node stdlib.\nfunction httpsFetch(urlStr, opts = {}) {\n    return new Promise((resolve, reject) => {\n        let parsed;\n        try { parsed = new urlmod.URL(urlStr); }\n        catch (e) { return reject(new Error('bad URL: ' + urlStr)); }\n        const isHttps = parsed.protocol === 'https:';\n        const lib = isHttps ? https : http;\n        const body = opts.body;\n        const headers = Object.assign({}, opts.headers || {});\n        if (body && !headers['Content-Length']) headers['Content-Length'] = Buffer.byteLength(body);\n        const req = lib.request({\n            method: opts.method || 'GET',\n            hostname: parsed.hostname,\n            port: parsed.port || (isHttps ? 443 : 80),\n            path: parsed.pathname + (parsed.search || ''),\n            headers,\n            timeout: opts.timeoutMs || 5000,\n            rejectUnauthorized: opts.rejectUnauthorized !== false\n        }, (res) => {\n            let data = '';\n            res.on('data', (c) => { data += c; });\n            res.on('end', () => resolve({\n                ok: res.statusCode >= 200 && res.statusCode < 300,\n                status: res.statusCode\n            }));\n        });\n        req.on('error', reject);\n        req.on('timeout', () => { req.destroy(new Error('timeout')); });\n        if (body) req.write(body);\n        req.end();\n    });\n}\n\nconst trinoScheme = env.get('AI_INSIGHT_TRINO__HTTP_SCHEME') || 'https';\nconst trinoHost   = env.get('AI_INSIGHT_TRINO__HOST');\nconst trinoPort   = env.get('AI_INSIGHT_TRINO__PORT') || 8443;\nconst nifiBase    = env.get('FACIS_NIFI_BASE') || 'https://212.132.83.82:8443';\nconst kafkaBoot   = env.get('FACIS_KAFKA_BROKERS') || env.get('DSP_KAFKA_BOOTSTRAP') || '';\n\nfunction withTimeout(promise, ms) {\n    return Promise.race([\n        promise,\n        new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout ${ms}ms`)), ms))\n    ]);\n}\n\nasync function probe(name, url, opts = {}) {\n    const start = Date.now();\n    try {\n        const res = await withTimeout(\n            httpsFetch(url, { method: opts.method || 'GET', headers: opts.headers }),\n            opts.timeoutMs || 3000\n        );\n        const ms = Date.now() - start;\n        return { service: name, url, status: res.ok ? 'healthy' : 'degraded', http_status: res.status, latency_ms: ms };\n    } catch (e) {\n        return { service: name, url, status: 'unreachable', error: String(e.message || e), latency_ms: Date.now() - start };\n    }\n}\n\nconst tasks = [\n    probe('orce',       'http://localhost:1880/api/v1/health'),\n    probe('ai-insight', 'http://localhost:1880/api/v1/health')\n];\nif (trinoHost) tasks.push(probe('trino', `${trinoScheme}://${trinoHost}:${trinoPort}/v1/info`));\ntasks.push(probe('nifi', `${nifiBase}/nifi-api/flow/about`));\n\nconst results = await Promise.all(tasks);\n\nconst kafkaBrokers = kafkaBoot ? kafkaBoot.split(',').map(s => s.trim()).filter(Boolean) : [];\nresults.push({\n    service: 'kafka', url: null,\n    status: kafkaBrokers.length ? 'configured' : 'unconfigured',\n    brokers: kafkaBrokers, broker_count: kafkaBrokers.length, latency_ms: null\n});\n\nconst summary = {\n    healthy:     results.filter(r => r.status === 'healthy').length,\n    degraded:    results.filter(r => r.status === 'degraded').length,\n    unreachable: results.filter(r => r.status === 'unreachable').length,\n    configured:  results.filter(r => r.status === 'configured').length,\n    total:       results.length\n};\n\nmsg._result = { ok: true, data: { generated_at: new Date().toISOString(), summary, services: results } };\nreturn msg;\n",
     "outputs": 1,
     "x": 460,
     "y": 100,
-    "wires": [["link-response-integrations"]],
+    "wires": [
+      [
+        "link-response-integrations"
+      ]
+    ],
     "libs": [
-      { "var": "https", "module": "https" },
-      { "var": "http",  "module": "http" },
-      { "var": "urlmod", "module": "url" }
+      {
+        "var": "https",
+        "module": "https"
+      },
+      {
+        "var": "http",
+        "module": "http"
+      },
+      {
+        "var": "urlmod",
+        "module": "url"
+      }
     ]
   },
   {
@@ -38,7 +57,9 @@
     "z": "tab_aiui_integrations",
     "name": "→ Response (integrations)",
     "mode": "link",
-    "links": ["link-from-response"],
+    "links": [
+      "link-from-response"
+    ],
     "x": 770,
     "y": 100,
     "wires": []

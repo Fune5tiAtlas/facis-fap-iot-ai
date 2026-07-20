@@ -22,9 +22,60 @@
     "y": 120,
     "wires": [
       [
-        "fn_build_latest_response"
+        "link_call_auth_latest"
       ]
     ]
+  },
+  {
+    "id": "link_call_auth_latest",
+    "type": "link call",
+    "z": "tab_ai_insight_latest",
+    "name": "aiinsight.auth",
+    "links": [
+      "aiinsight_auth_verify_in"
+    ],
+    "timeout": "5",
+    "x": 440,
+    "y": 60,
+    "wires": [
+      [
+        "fn_auth_gate_latest"
+      ]
+    ]
+  },
+  {
+    "id": "fn_auth_gate_latest",
+    "type": "function",
+    "z": "tab_ai_insight_latest",
+    "name": "RequireVerifiedRole",
+    "func": "const parseList = (value, fallback) => {\n    if (value === undefined || value === null || value === '') return fallback;\n    try {\n        const parsed = JSON.parse(value);\n        if (Array.isArray(parsed)) return parsed.map((item) => String(item));\n    } catch (_) {\n        // ignore\n    }\n    return fallback;\n};\n\nif (msg.authRejected) {\n    return [null, msg];\n}\nif (String(msg._authMode || 'enforce').toLowerCase() === 'off') {\n    return [msg, null];\n}\n\nconst requiredRoles = parseList(env.get('AI_INSIGHT_POLICY__REQUIRED_ROLES'), ['ai_insight_consumer']);\nconst roles = (msg.identity && Array.isArray(msg.identity.roles)) ? msg.identity.roles : [];\nconst missingRole = requiredRoles.find((role) => !roles.includes(role));\nif (missingRole) {\n    msg.statusCode = 403;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = { detail: 'Policy denied: missing required role ' + missingRole };\n    return [null, msg];\n}\nreturn [msg, null];\n",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 580,
+    "y": 60,
+    "wires": [
+      [
+        "fn_build_latest_response"
+      ],
+      [
+        "http_resp_latest_auth_json"
+      ]
+    ]
+  },
+  {
+    "id": "http_resp_latest_auth_json",
+    "type": "http response",
+    "z": "tab_ai_insight_latest",
+    "name": "Auth 401/403 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 800,
+    "y": 60,
+    "wires": []
   },
   {
     "id": "fn_build_latest_response",
