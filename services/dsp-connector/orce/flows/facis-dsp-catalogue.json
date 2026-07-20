@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS DSP — Catalogue",
     "disabled": false,
-    "info": "FR-DSP-001 — POST /dsp/catalogue/request.\n\nThe catalogue is a static list of FACIS Gold-layer dataset offers. It is\nmounted into the ORCE pod as a read-only ConfigMap at\n/data/dsp-config/datasets.json and loaded into flow.context once at startup.\n\nFilter + cursor logic mirrors src/dsp-connector/catalogue_store.py:7-139:\n  - filter.assetType        -> exact match on metadata.assetType\n  - filter.datasetIds        -> set membership on dataset.id\n  - page.limit (default 50)  -> slice size\n  - page.cursor              -> integer offset; non-numeric -> 0\n  - nextCursor               -> str(start+limit) when more remain, else null"
+    "info": "FR-DSP-001 — POST /dsp/catalogue/request.\n\nThe catalogue is DERIVED from the FACIS Data Sink's queryable store: the\nderivation node lists live gold-layer tables in the Trino/Iceberg lakehouse\nand merges them with /data/dsp-config/datasets.json, which acts as a rich\nmetadata OVERLAY and as an offline FALLBACK. See\ndocs/architecture/fap-role-mapping.md for the FACIS Data Sink role.\n\nMerge semantics (dsp-cat-derive-fn):\n  - overlay entry whose gold table is live   -> kept as-is (rich metadata wins)\n  - overlay entry whose table is NOT live    -> dropped (warn)\n  - live gold table with no overlay entry    -> minimal auto-derived entry\n  - catalogueSource = 'lakehouse' on success\n\nAvailability over strictness: on ANY Trino failure the derivation never\nempties an already-populated catalogue; if the catalogue is still empty it\nfalls back to the full overlay file (catalogueSource = 'overlay-fallback').\nThe startup file-read (dsp-cat-read) seeds the catalogue within ms at boot;\nthe derivation replaces it once Trino answers and re-runs every 10 minutes.\n\nFilter + cursor logic mirrors src/dsp-connector/catalogue_store.py:7-139:\n  - filter.assetType        -> exact match on metadata.assetType\n  - filter.datasetIds        -> set membership on dataset.id\n  - page.limit (default 50)  -> slice size\n  - page.cursor              -> integer offset; non-numeric -> 0\n  - nextCursor               -> str(start+limit) when more remain, else null"
   },
   {
     "id": "dsp-cat-bootstrap",
@@ -101,6 +101,66 @@
     "wires": []
   },
   {
+    "id": "dsp-cat-derive-inject",
+    "type": "inject",
+    "z": "tab-dsp-catalogue",
+    "name": "@startup + every 10m",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "600",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 150,
+    "y": 200,
+    "wires": [
+      [
+        "dsp-cat-derive-fn"
+      ]
+    ]
+  },
+  {
+    "id": "dsp-cat-derive-fn",
+    "type": "function",
+    "z": "tab-dsp-catalogue",
+    "name": "derive catalogue from lakehouse",
+    "func": "// Derives the catalogue from the FACIS Data Sink's lakehouse: lists live\n// gold-layer tables in Trino and merges them with datasets.json (the rich\n// metadata overlay + offline fallback). Runs at startup and every 10 min.\n// Availability over strictness — see this tab's info panel for the rules.\nconst catalog = env.get('DSP_TRINO_CATALOG') || 'fap-iotai-stackable';\nconst trinoUrl = env.get('DSP_TRINO_URL') || 'https://trino-coordinator.stackable.svc.cluster.local:8443';\nconst user = env.get('DSP_TRINO_USER') || 'admin';\nconst pass = env.get('DSP_TRINO_PASSWORD') || '';\nconst schema = 'information_schema';\nconst auth = 'Basic ' + Buffer.from(user + ':' + pass).toString('base64');\nconst sql = 'SELECT table_schema, table_name FROM \"' + catalog + '\".information_schema.tables WHERE table_schema = \\'gold\\'';\n\n// Read the overlay first (same fs.readFileSync + DSP_DATASETS_PATH pattern as\n// dsp-data-lookup-fn) so it is available both as the merge source and as the\n// Trino-down fallback.\nlet overlay = [];\ntry {\n    const parsed = JSON.parse(fs.readFileSync(env.get('DSP_DATASETS_PATH') || '/data/dsp-config/datasets.json', 'utf8'));\n    if (Array.isArray(parsed)) overlay = parsed;\n} catch (err) {\n    node.warn('catalogue: could not read overlay datasets.json: ' + (err && err.message ? err.message : err));\n}\n\nfunction done(source) {\n    // Unwired completion signal (this node has no downstream in production);\n    // lets the flow-test harness observe termination without polling.\n    node.send({ payload: { catalogueSource: source, size: (flow.get('catalogue') || []).length } });\n}\n\n(async () => {\n    // trinoRequest: copied verbatim from dsp-data-trino-fn (facis-dsp-data.json)\n    // — same nextUri-chain statement API, auth headers, and rejectUnauthorized.\n    function trinoRequest(urlStr, body) {\n        return new Promise((resolve, reject) => {\n            const u = new urlmod.URL(urlStr);\n            const mod = u.protocol === 'http:' ? http : https;\n            const opts = {\n                method: body ? 'POST' : 'GET',\n                hostname: u.hostname,\n                port: u.port || (u.protocol === 'http:' ? 80 : 443),\n                path: u.pathname + u.search,\n                headers: {\n                    Authorization: auth,\n                    'X-Trino-User': user,\n                    'X-Trino-Catalog': catalog,\n                    'X-Trino-Schema': schema,\n                    'Content-Type': 'text/plain'\n                },\n                rejectUnauthorized: false\n            };\n            const req = mod.request(opts, (res) => {\n                let data = '';\n                res.on('data', (c) => { data += c; });\n                res.on('end', () => {\n                    try { resolve(JSON.parse(data)); } catch (e) { reject(e); }\n                });\n            });\n            req.on('error', reject);\n            if (body) req.write(body);\n            req.end();\n        });\n    }\n\n    try {\n        let result = await trinoRequest(trinoUrl + '/v1/statement', sql);\n        let rows = [];\n        let iterations = 0;\n        while (result && iterations < 25) {\n            iterations++;\n            if (result.error) throw new Error('Trino error: ' + JSON.stringify(result.error));\n            if (result.data) rows = rows.concat(result.data);\n            if (!result.nextUri) break;\n            result = await trinoRequest(result.nextUri, null);\n        }\n\n        // rows are [table_schema, table_name]; the query already filters gold.\n        const liveTables = new Set();\n        rows.forEach((r) => { if (r && r[0] && r[1]) liveTables.add(r[0] + '.' + r[1]); });\n\n        const merged = [];\n        const claimed = new Set();\n        overlay.forEach((entry) => {\n            const md = (entry && entry.metadata) || {};\n            const key = md.schema + '.' + md.table;\n            if (liveTables.has(key)) {\n                merged.push(entry);\n                claimed.add(key);\n            } else {\n                node.warn('catalogue: dropping ' + (entry && entry.id) + ' — table ' + md.schema + '.' + md.table + ' not present in lakehouse');\n            }\n        });\n\n        let autoderived = 0;\n        rows.forEach((r) => {\n            if (!r || !r[0] || !r[1]) return;\n            const key = r[0] + '.' + r[1];\n            if (claimed.has(key)) return;\n            const tableName = r[1];\n            merged.push({\n                id: 'dataset:facis:' + tableName.replace(/_/g, '-'),\n                metadata: { title: tableName, description: 'Gold-layer dataset ' + tableName + ' (derived from lakehouse metadata)', assetType: 'iot.timeseries', format: 'iceberg/parquet', schema: 'gold', table: tableName, timeColumn: null },\n                offers: [ { id: 'offer:facis:' + tableName.replace(/_/g, '-') + ':read', policySummary: { purpose: 'analytics', rate_limit: '10 req/min', ttl: 'PT1H' } } ]\n            });\n            autoderived++;\n        });\n\n        flow.set('catalogue', merged);\n        flow.set('catalogueSource', 'lakehouse');\n        node.log('DSP catalogue: derived ' + merged.length + ' dataset(s) from lakehouse (' + autoderived + ' auto-derived)');\n        done('lakehouse');\n    } catch (err) {\n        const reason = err && err.message ? err.message : String(err);\n        const existing = flow.get('catalogue');\n        if (Array.isArray(existing) && existing.length > 0) {\n            node.warn('catalogue: Trino derivation failed, keeping existing catalogue (' + existing.length + ' entries) — ' + reason);\n            done(flow.get('catalogueSource') || null);\n        } else {\n            flow.set('catalogue', overlay);\n            flow.set('catalogueSource', 'overlay-fallback');\n            node.warn('catalogue: Trino derivation failed and catalogue empty, falling back to overlay file (' + overlay.length + ' entries) — ' + reason);\n            done('overlay-fallback');\n        }\n    }\n})();\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "http",
+        "module": "http"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      },
+      {
+        "var": "urlmod",
+        "module": "url"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 430,
+    "y": 200,
+    "wires": [
+      []
+    ]
+  },
+  {
     "id": "dsp-cat-in",
     "type": "http in",
     "z": "tab-dsp-catalogue",
@@ -165,8 +225,12 @@
     "property": "iamRejected",
     "propertyType": "msg",
     "rules": [
-      { "t": "true" },
-      { "t": "false" }
+      {
+        "t": "true"
+      },
+      {
+        "t": "false"
+      }
     ],
     "checkall": "true",
     "repair": false,

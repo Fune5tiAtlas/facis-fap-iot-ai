@@ -36,7 +36,23 @@ The flow uses two PVC-backed JSON files under `/data/dsp-state/`:
 - `transfers.json` — the transfer-process map keyed by `tp-...` id
 - `negotiations.json` — the negotiation map keyed by `neg-...` id
 
-The catalogue is a read-only ConfigMap mount at `/data/dsp-config/datasets.json`.
+The catalogue is **derived** from the FACIS Data Sink's queryable store (the
+Trino/Iceberg lakehouse — see [`docs/architecture/fap-role-mapping.md`](../../../docs/architecture/fap-role-mapping.md)).
+The `dsp-cat-derive-fn` node lists live gold-layer tables in Trino and merges
+them with `/data/dsp-config/datasets.json`, which serves as a rich metadata
+**overlay** and as an offline **fallback**:
+
+- overlay entry whose gold table is live → kept as-is (rich metadata wins);
+- overlay entry whose table is not live → dropped;
+- live gold table with no overlay entry → minimal auto-derived entry;
+- `catalogueSource = 'lakehouse'` on success.
+
+Availability over strictness: on any Trino failure the derivation never
+empties an already-populated catalogue; if the catalogue is still empty it
+falls back to the full overlay file (`catalogueSource = 'overlay-fallback'`).
+The startup file-read seeds the catalogue within milliseconds at boot; the
+derivation replaces it once Trino answers and re-runs every 10 minutes. The
+overlay file is a read-only ConfigMap mount at `/data/dsp-config/datasets.json`.
 
 **Single-replica only**: the file-based state is not multi-replica safe.
 The ORCE pod must run with `replicas: 1`. Postgres backing is out of scope
