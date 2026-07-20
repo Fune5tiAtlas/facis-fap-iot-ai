@@ -52,7 +52,29 @@ spec:
               sleep "${PRE_DEPLOY_SLEEP}"
 
               cd /flows
-              jq -s 'add' *.json > /tmp/combined.json
+              jq -s 'add' *.json > /tmp/ours.json
+
+              # Merge-safe deploy: replace only this service's tabs/subflows,
+              # keep every other service's flows on the shared ORCE runtime.
+              if curl -sS --fail \
+                -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                "${ORCE_ADMIN_URL}/flows" > /tmp/current.json; then
+                echo "[orce-flow-deploy] merging into existing flow set"
+              else
+                echo "[orce-flow-deploy] GET /flows failed; assuming empty runtime"
+                echo '[]' > /tmp/current.json
+              fi
+
+              jq -s '
+                (.[0] | if type == "object" and has("flows") then .flows else . end) as $current
+                | .[1] as $ours
+                | ($ours | map(.id)) as $ourIds
+                | ($ours | map(select(.type == "tab" or .type == "subflow") | .id)) as $ourScopes
+                | ($current | map(select(
+                    ((.id) as $i | $ourIds | index($i) | not)
+                    and (((.z // "")) as $z | $ourScopes | index($z) | not)
+                  ))) + $ours
+              ' /tmp/current.json /tmp/ours.json > /tmp/combined.json
 
               echo "[orce-flow-deploy] POST ${ORCE_ADMIN_URL}/flows ($(wc -c </tmp/combined.json) bytes)"
               curl -sS --fail \
