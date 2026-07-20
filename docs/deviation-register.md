@@ -13,6 +13,7 @@ reviewable in one place rather than being rediscovered from the code.
 
 - [D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)](#d-1--data-sink-realized-as-a-composite-tier-nf-4--q-03)
 - [D-2 — Single-replica ORCE runtime for DSP connector state (NF-5)](#d-2--single-replica-orce-runtime-for-dsp-connector-state-nf-5)
+- [D-3 — Encryption at rest without an external KMS (NF-8)](#d-3--encryption-at-rest-without-an-external-kms-nf-8)
 - [Pending candidate entries](#pending-candidate-entries)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
@@ -93,10 +94,48 @@ re-architecture of the store.
 
 **Approval status**: `Pending — demonstrator scope`.
 
+## D-3 — Encryption at rest without an external KMS (NF-8)
+
+**Requirement**: Encryption of lakehouse data at rest, with the review calling
+for the encryption keys to be managed by an external / customer-managed Key
+Management Service (KMS) rather than by the storage provider.
+
+**Implementation**: The lakehouse bucket (`fap-iotai-stackable` on IONOS Object
+Storage) has default server-side encryption enabled — **SSE-S3, AES-256**, with
+keys managed by IONOS (see
+[`infrastructure/s3/README.md`](../infrastructure/s3/README.md)). Every object
+written after enablement is encrypted at rest. Key management is **not** placed
+under an external KMS.
+
+**Justification**: An external-KMS-managed model is not implementable on this
+object store, confirmed both by live test and by provider documentation. IONOS
+Object Storage offers no KMS and does not implement SSE-KMS — an explicit
+`aws:kms` write is rejected by the endpoint, and its only server-side algorithm
+is AES-256 (SSE-S3 or customer-provided SSE-C). Trino's Iceberg S3 filesystem —
+through which all lakehouse writes pass — supports a KMS mode only against AWS
+KMS, with no non-AWS KMS endpoint, so the client side has nothing to point at
+either. The remaining customer-key mechanism, SSE-C with a static key, is not a
+KMS (no per-object data keys, no rotation without rewriting every object) and
+would require a full table-rewrite migration with permanent data loss on key
+loss; it was evaluated and not adopted for a regenerable demonstrator dataset.
+A true external KMS would require moving the lakehouse to an object store that
+provides one (for example AWS S3 with KMS, or a self-run Ceph RadosGW wired to
+HashiCorp Vault), which is out of scope for this demonstrator.
+
+**Residual risk & mitigation**: Keys are provider-managed, so key custody and
+rotation are IONOS's rather than the operator's — the deployment cannot perform
+independent crypto-shredding by destroying a customer key. Data at rest is
+nonetheless encrypted (AES-256), transport is TLS-protected (TLS 1.3 minimum at
+the ingress; mTLS to Kafka; TLS to Trino/S3), and the lakehouse data is
+regenerable from its sources, bounding the impact of the provider-managed key
+model. Adopting an external KMS is a defined follow-up gated on an object-store
+change, not a configuration adjustment on the current stack.
+
+**Approval status**: `Pending — RFC to client/PMO (object-store KMS capability)`.
+
 ## Pending candidate entries
 
 The following candidate deviations are identified and awaiting a full entry; the
 detail is to be completed.
 
-- TLS 1.3 minimum-version enforcement location (NF-8) — to be completed.
 - Dual DSP implementation, Python and ORCE (NF-5 / NF-7) — to be completed.
