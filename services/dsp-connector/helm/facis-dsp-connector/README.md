@@ -60,6 +60,16 @@ Rendered in both modes:
   from the `-dsp-secrets` Secret's `DSP_PG_PASSWORD` key; the state flow reaches
   it via `DSP_PG_URI`. Configured under `dsp.pg.*` — disable with
   `dsp.pg.enabled=false`.
+- `NetworkPolicy/<fullname>-postgres` + `NetworkPolicy/<fullname>-mongo` (NF-8)
+  — Calico-enforced, INGRESS-ONLY default-deny on the two datastores. Postgres
+  (5432) and Mongo (27017) accept traffic ONLY from the dedicated ORCE pod
+  (component `dsp-orce`); every other pod is denied. Egress is untouched, so
+  ORCE's outbound Kafka/Trino/DID-fetch is unaffected. Rendered only when
+  `dedicatedOrce.enabled` (in shared-pod mode the client's labels are outside
+  this chart, so enabling them would cut the state path — they self-skip).
+  Disable with `networkPolicies.enabled=false`. CAVEAT: because Calico enforces
+  these, a selector that drifts from the datastore/ORCE pod labels would sever
+  the live NF-5 state connection — keep them in sync.
 - `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Polls the
   target ORCE Admin API until ready, fetches its live flow set, merges this
   chart's tabs into it by node id (never a full-replace — see the Job script's

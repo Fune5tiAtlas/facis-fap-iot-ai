@@ -210,6 +210,36 @@ dspStatePvc:
   accessModes:
     - ReadWriteOnce
 
+# ---------------------------------------------------------------------------
+# NetworkPolicies (NF-8)
+# ---------------------------------------------------------------------------
+# Default-deny ingress on this chart's datastores, enforced by Calico. Two
+# INGRESS-ONLY policies (templates/networkpolicy.yaml):
+#   - Postgres (component dsp-state-postgres): allow 5432 ONLY from the
+#     dedicated ORCE pod (component dsp-orce). Denies every other pod.
+#   - Mongo    (component identity-hub-mongo): allow 27017 ONLY from the
+#     dedicated ORCE pod. Denies every other pod.
+# The dsp-orce pod is the sole legitimate client of both, so this is a pure
+# security win with no effect on the working NF-5 state path. Egress is left
+# untouched (no rules), so ORCE's outbound Kafka/Trino/DID-fetch traffic is
+# unaffected.
+#
+# Only rendered when dedicatedOrce.enabled=true: in shared-pod mode the client
+# is the shared ORCE pod, whose labels are outside this chart and cannot be
+# selected, so enabling these would sever the state path — they self-skip.
+#
+# No ORCE-pod ingress policy is shipped: the dedicated ORCE pod serves the
+# admin API + DSP HTTP endpoints and takes traffic from ingress-nginx and
+# possibly other in-namespace flows on the shared `orce` namespace, whose
+# labels this chart does not own. A too-tight podSelector there would drop
+# live NF-1..NF-6 traffic under Calico, so it is deliberately omitted; the
+# datastore policies are the committed, zero-blast-radius deliverable.
+#
+# Enforced by Calico — a wrong selector cuts a live connection. Disable with
+# --set networkPolicies.enabled=false.
+networkPolicies:
+  enabled: true
+
 nameOverride: ""
 fullnameOverride: ""
 

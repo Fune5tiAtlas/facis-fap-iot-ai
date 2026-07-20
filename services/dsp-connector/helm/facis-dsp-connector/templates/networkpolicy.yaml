@@ -1,0 +1,76 @@
+{{/*
+NF-8 datastore NetworkPolicies. Calico (the cluster CNI) enforces these, so a
+wrong selector SEVERS a working connection — every label below is copied from
+the datastore/ORCE pod templates and must stay in sync with them.
+
+INGRESS-ONLY on the datastore pods: the default-deny that a NetworkPolicy
+imposes applies only to the SELECTED pods' ingress. Egress is untouched, so the
+dedicated ORCE pod's outbound Kafka/Trino/DID-fetch traffic is unaffected — no
+egress rules here, on purpose.
+
+Only rendered when dedicatedOrce.enabled: the sole legitimate client of these
+datastores is this chart's dedicated ORCE pod (component dsp-orce), so the allow
+rule targets exactly that pod. In shared-pod mode (dedicatedOrce.enabled=false)
+the client is the shared ORCE pod, whose labels live outside this chart and
+cannot be selected here — locking these policies on would then cut the state
+path, so they are skipped. Disable independently with networkPolicies.enabled.
+*/}}
+{{- if and .Values.networkPolicies.enabled .Values.dedicatedOrce.enabled }}
+{{- if .Values.dsp.pg.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-state-postgres
+spec:
+  # Selects the Postgres pod (postgres-statefulset.yaml pod labels).
+  podSelector:
+    matchLabels:
+      {{- include "facis-dsp-connector.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dsp-state-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the dedicated ORCE pod (DSP_PG_URI client) may reach 5432.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "facis-dsp-connector.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: dsp-orce
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
+{{- if .Values.dsp.iam.mongo.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-mongo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: identity-hub-mongo
+spec:
+  # Selects the Identity Hub Mongo pod (mongo-statefulset.yaml pod labels).
+  podSelector:
+    matchLabels:
+      {{- include "facis-dsp-connector.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: identity-hub-mongo
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the dedicated ORCE pod (DSP_MONGO_URI client) may reach 27017.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "facis-dsp-connector.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: dsp-orce
+      ports:
+        - protocol: TCP
+          port: 27017
+{{- end }}
+{{- end }}
