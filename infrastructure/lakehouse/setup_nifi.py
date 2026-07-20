@@ -3,13 +3,18 @@
 MS2 NiFi Setup: Configure Kafka → Bronze ingestion pipeline.
 
 Creates NiFi 2.6 processor groups and flows that consume from 9 Kafka topics
-and INSERT into the corresponding Trino Bronze tables via Trino REST API.
+and INSERT into the corresponding Trino Bronze tables via a shared JDBC pool.
 
 Architecture (all internal to Stackable K8s cluster):
     ConsumeKafka (Kafka3ConnectionService + Stackable TLS)
         → ReplaceText (escape SQL quotes)
         → ReplaceText (build INSERT SQL)
-        → InvokeHTTP (POST to Trino REST /v1/statement, Basic auth)
+        → PutSQL (executes FlowFile content via the "Trino JDBC Pool"
+                  DBCPConnectionPool controller service, autocommit=true)
+
+The "Trino JDBC Pool" controller service carries the Trino credentials and
+JDBC driver location; it is provisioned separately (provision_nifi_jdbc.sh /
+restore-trino-jdbc-pool.sh) and looked up by name here — never created.
 
 Usage:
     python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
@@ -56,10 +61,8 @@ STACKABLE_KEYSTORE = "/stackable/server_tls/keystore.p12"
 STACKABLE_TRUSTSTORE = "/stackable/server_tls/truststore.p12"
 STACKABLE_STORE_PASSWORD = "secret"
 
-# Trino password auth (from trino-users K8s secret)
-# Override via FACIS_TRINO_USER / FACIS_TRINO_PASSWORD env vars or .env.cluster
-TRINO_USER = os.getenv("FACIS_TRINO_USER", "admin")
-TRINO_PASSWORD = os.getenv("FACIS_TRINO_PASSWORD", "sj3u82ka")
+# Trino credentials are carried by the shared "Trino JDBC Pool" controller
+# service (provisioned separately), not by this script.
 
 CONSUMER_GROUP = "facis-nifi-lakehouse"
 
@@ -238,10 +241,14 @@ class NiFiClient:
 
 PROC_CONSUME_KAFKA = "org.apache.nifi.kafka.processors.ConsumeKafka"
 PROC_REPLACE_TEXT = "org.apache.nifi.processors.standard.ReplaceText"
-PROC_INVOKE_HTTP = "org.apache.nifi.processors.standard.InvokeHTTP"
+PROC_PUTSQL = "org.apache.nifi.processors.standard.PutSQL"
 
 SVC_SSL_CONTEXT = "org.apache.nifi.ssl.StandardSSLContextService"
 SVC_KAFKA_CONNECTION = "org.apache.nifi.kafka.service.Kafka3ConnectionService"
+
+# Shared DBCPConnectionPool carrying Trino JDBC creds + driver location.
+# Provisioned separately; looked up by name, never created here.
+TRINO_JDBC_POOL_NAME = "Trino JDBC Pool"
 
 # ---------------------------------------------------------------------------
 # Flow construction
@@ -311,13 +318,13 @@ def create_ingestion_flow(
     topic: str,
     table: str,
     kafka_svc_id: str,
-    ssl_svc_id: str,
+    jdbc_svc_id: str,
     catalog: str,
     x_offset: int = 0,
     y_offset: int = 0,
 ) -> list[str]:
     """Create one topic ingestion flow:
-    ConsumeKafka → EscapeQuotes → BuildInsert → InvokeHTTP(Trino)
+    ConsumeKafka → EscapeQuotes → BuildInsert → PutSQL(Trino JDBC)
 
     Returns list of processor IDs.
     """
@@ -370,29 +377,24 @@ def create_ingestion_flow(
     )
     proc_ids.append(build["id"])
 
-    # 4. InvokeHTTP — POST to Trino REST API
-    # Basic auth with Trino password user; dynamic properties become HTTP headers
-    basic_auth = base64.b64encode(f"{TRINO_USER}:{TRINO_PASSWORD}".encode()).decode()
-    invoke = client.create_processor(pg_id, PROC_INVOKE_HTTP,
+    # 4. PutSQL — execute the rendered INSERT against Trino over JDBC.
+    # SQL comes from FlowFile content (built upstream), so the SQL-statement
+    # property is left empty. Trino's Iceberg connector requires JDBC
+    # autocommit=true; the shared "Trino JDBC Pool" carries the credentials.
+    putsql = client.create_processor(pg_id, PROC_PUTSQL,
         f"Trino INSERT: {table}",
         {
-            "HTTP Method": "POST",
-            "HTTP URL": f"{TRINO_INTERNAL_URL}/v1/statement",
-            "Request Content-Type": "text/plain",
-            "Request Body Enabled": "true",
-            "SSL Context Service": ssl_svc_id,
-            # Basic auth via Authorization header (dynamic property)
-            "Authorization": f"Basic {basic_auth}",
-            "X-Trino-User": TRINO_USER,
-            "X-Trino-Catalog": catalog,
-            "X-Trino-Schema": "bronze",
+            "JDBC Connection Pool": jdbc_svc_id,
+            "putsql-sql-statement": "",
+            "database-session-autocommit": "true",
+            "Support Fragmented Transactions": "false",
         },
         x=x_offset + 1200, y=y_offset,
-        auto_terminate=["Original", "Response", "No Retry", "Failure", "Retry"],
+        auto_terminate=["success", "failure", "retry"],
     )
-    proc_ids.append(invoke["id"])
+    proc_ids.append(putsql["id"])
 
-    # Connect: Consume → Escape → Build → Invoke
+    # Connect: Consume → Escape → Build → PutSQL
     client.create_connection(pg_id, proc_ids[0], proc_ids[1], ["success"])
     client.create_connection(pg_id, proc_ids[1], proc_ids[2], ["success"])
     client.create_connection(pg_id, proc_ids[2], proc_ids[3], ["success"])
@@ -424,16 +426,22 @@ def add_topic(nifi_url: str, token: str, catalog: str, topic: str, dry_run: bool
         sys.exit(1)
     pg_id = pg["id"]
 
-    ssl_svc_id = client.get_controller_service_id(pg_id, "Stackable TLS Context")
     kafka_svc_id = client.get_controller_service_id(pg_id, "FACIS Kafka Connection")
-    if not ssl_svc_id or not kafka_svc_id:
-        logger.error("Could not find the existing controller services in the process group — aborting rather than creating duplicates.")
+    jdbc_svc_id = client.get_controller_service_id(root_id, TRINO_JDBC_POOL_NAME)
+    if not kafka_svc_id:
+        logger.error("Could not find the existing Kafka controller service in the process group — aborting rather than creating duplicates.")
+        sys.exit(1)
+    if not jdbc_svc_id:
+        logger.error(
+            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found at root — "
+            "provision it first (provision_nifi_jdbc.sh / restore-trino-jdbc-pool.sh)."
+        )
         sys.exit(1)
 
     # y_offset places the new flow below the 9 existing ones on the NiFi
     # canvas (each existing flow is 200px apart, see setup_nifi()'s loop).
     proc_ids = create_ingestion_flow(
-        client, pg_id, topic, table, kafka_svc_id, ssl_svc_id, catalog,
+        client, pg_id, topic, table, kafka_svc_id, jdbc_svc_id, catalog,
         x_offset=0, y_offset=len(TOPIC_TABLE_MAP) * 200,
     )
     started = 0
@@ -506,13 +514,23 @@ def setup_nifi(
         logger.warning(f"  Could not enable services: {e}")
         logger.warning("  Services may need manual enablement in NiFi UI")
 
+    # Look up the shared Trino JDBC pool (provisioned separately — never
+    # created here). Fail loudly if absent; PutSQL cannot land without it.
+    jdbc_svc_id = client.get_controller_service_id(root_id, TRINO_JDBC_POOL_NAME)
+    if not jdbc_svc_id:
+        logger.error(
+            f"Controller service '{TRINO_JDBC_POOL_NAME}' not found at root — "
+            "provision it first (provision_nifi_jdbc.sh / restore-trino-jdbc-pool.sh)."
+        )
+        sys.exit(1)
+
     # Create ingestion flows
     logger.info("Creating ingestion flows...")
     all_proc_ids = []
     for i, (topic, table) in enumerate(TOPIC_TABLE_MAP.items()):
         proc_ids = create_ingestion_flow(
             client, pg_id, topic, table,
-            kafka_svc_id, ssl_svc_id, catalog,
+            kafka_svc_id, jdbc_svc_id, catalog,
             x_offset=0, y_offset=i * 200,
         )
         all_proc_ids.extend(proc_ids)
@@ -538,7 +556,7 @@ def setup_nifi(
     print(f"  Kafka Bootstrap:  {KAFKA_BOOTSTRAP_INTERNAL}")
     print(f"  Consumer Group:   {CONSUMER_GROUP}")
     print(f"  Trino Endpoint:   {TRINO_INTERNAL_URL}")
-    print(f"  Trino Auth:       Basic ({TRINO_USER})")
+    print(f"  Trino Landing:    PutSQL via '{TRINO_JDBC_POOL_NAME}' (JDBC, autocommit)")
     print(f"  Flows Created:    {len(TOPIC_TABLE_MAP)}")
     print(f"  Processors:       {started}/{len(all_proc_ids)} running")
     print()
