@@ -113,7 +113,7 @@ The chart enforces pod security best practices by default:
 |-----------------------|---------------------|-------------|
 | `service.type`        | Service type        | `ClusterIP` |
 | `service.httpPort`    | HTTP port           | `8080`      |
-| `service.modbusPort`  | Modbus TCP port     | `502`       |
+| `service.modbusPort`  | Modbus TCP port     | `5020`      |
 
 ## Architecture
 

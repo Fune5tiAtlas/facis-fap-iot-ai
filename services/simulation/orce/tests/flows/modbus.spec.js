@@ -1,11 +1,19 @@
 /* eslint-disable */
 //
 // modbus.spec.js — verifies the IEEE 754 register encoding and address layout
-// in the Modbus adapter (`flows/facis-simulation-modbus.json`).
+// in the Modbus adapter (`flows/facis-simulation-modbus.json`), plus flow
+// wiring guards (context scope, port, dead links).
 //
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+function readFlow() {
+    const p = path.join(__dirname, '..', '..', 'flows', 'facis-simulation-modbus.json');
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+}
 
 function float32ToRegisters(value) {
     const buf = Buffer.alloc(4);
@@ -137,4 +145,20 @@ test('modbus: missing meter returns no writes', () => {
     assert.deepEqual(buildWrites(null), []);
     assert.deepEqual(buildWrites({}), []);
     assert.deepEqual(buildWrites({ readings: {} }), []);
+});
+
+test('modbus flow: writer reads latest_meters from global context', () => {
+    const writer = readFlow().find((n) => n.id === 'fn-modbus-writer');
+    assert.match(writer.func, /global\.get\('latest_meters'\)/);
+    assert.doesNotMatch(writer.func, /flow\.get\('latest_meters'\)/);
+});
+
+test('modbus flow: server listens on unprivileged port 5020', () => {
+    const server = readFlow().find((n) => n.id === 'modbus-server-config');
+    assert.equal(server.serverPort, 5020);
+});
+
+test('modbus flow: no unwired link-in nodes', () => {
+    const dead = readFlow().filter((n) => n.type === 'link in' && (!n.links || n.links.length === 0));
+    assert.deepEqual(dead, []);
 });

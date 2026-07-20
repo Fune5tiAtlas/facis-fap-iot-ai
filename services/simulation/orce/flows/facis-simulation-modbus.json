@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS Simulation \u2014 Modbus Adapter",
     "disabled": false,
-    "info": "FACIS Simulation \u2014 Modbus TCP Slave Adapter\n\nExposes the latest energy-meter snapshot as Janitza UMG 96RM-shaped\nModbus TCP holding registers on port 502.\n\nRegister layout preserved from src/simulators/energy_meter/register_map.py:\n  19000-19006 active power L1/L2/L3/total (W)\n  19020-19024 voltage L1-N/L2-N/L3-N (V)\n  19040-19044 current L1/L2/L3 (A)\n  19060      power factor (-)\n  19062      total active energy (kWh)\n  19064      frequency (Hz)\n\nAll values are IEEE 754 float32 in big-endian register pairs.\nFC 3 (Read Holding Registers) and FC 4 (Read Input Registers) both\nresolve to the same data block.\n\nMulti-meter MVP: one modbus-server node per meter, distinguished by\nunit ID. Configure additional meters by duplicating the writer function\n+ modbus-server pair and pointing each at a different `latest_meters[i]`."
+    "info": "FACIS Simulation \u2014 Modbus TCP Slave Adapter\n\nExposes the latest energy-meter snapshot as Janitza UMG 96RM-shaped\nModbus TCP holding registers on port 5020 (unprivileged; matches\ndocs/api/modbus-reference.md).\n\nRegister layout:\n  19000-19006 active power L1/L2/L3/total (W)\n  19020-19024 voltage L1-N/L2-N/L3-N (V)\n  19040-19044 current L1/L2/L3 (A)\n  19060      power factor (-)\n  19062      total active energy (kWh)\n  19064      frequency (Hz)\n\nAll values are IEEE 754 float32 in big-endian register pairs (ABCD,\nhigh word first). FC 3 (Read Holding Registers) and FC 4 (Read Input\nRegisters) both resolve to the same data block.\n\nThe register block refreshes every second from the shared\n`latest_meters` global context written by the Feeds tab.\n\nMulti-meter MVP: one modbus-server node per meter, distinguished by\nunit ID. Configure additional meters by duplicating the writer function\n+ modbus-server pair and pointing each at a different `METER_INDEX`."
   },
   {
     "id": "modbus-server-config",
@@ -13,7 +13,7 @@
     "name": "FACIS Modbus Server",
     "logEnabled": false,
     "hostname": "0.0.0.0",
-    "serverPort": 502,
+    "serverPort": 5020,
     "responseDelay": 100,
     "delayUnit": "ms",
     "coilsBufferSize": 0,
@@ -38,24 +38,10 @@
     ]
   },
   {
-    "id": "link-in-modbus-envelope",
-    "type": "link in",
-    "z": "tab-modbus",
-    "name": "\u2190 sim.envelope",
-    "links": [],
-    "x": 130,
-    "y": 200,
-    "wires": [
-      [
-        "fn-modbus-writer"
-      ]
-    ]
-  },
-  {
     "id": "inject-modbus-refresh",
     "type": "inject",
     "z": "tab-modbus",
-    "name": "every 1s (fallback refresh)",
+    "name": "every 1s refresh",
     "props": [
       {
         "p": "payload"
@@ -80,7 +66,7 @@
     "type": "function",
     "z": "tab-modbus",
     "name": "build register block",
-    "func": "// Convert the latest meter snapshot from flow context into a full register\n// block, then push it into the modbus-server's holding-register space.\n// Mirrors src/simulators/energy_meter/{register_map,ieee754}.py.\n\nconst REGISTER_ADDRESSES = {\n    active_power_l1_w: 19000,\n    active_power_l2_w: 19002,\n    active_power_l3_w: 19004,\n    active_power_total_w: 19006,\n    voltage_l1_v: 19020,\n    voltage_l2_v: 19022,\n    voltage_l3_v: 19024,\n    current_l1_a: 19040,\n    current_l2_a: 19042,\n    current_l3_a: 19044,\n    power_factor: 19060,\n    total_energy_kwh: 19062,\n    frequency_hz: 19064\n};\n\nfunction float32ToRegisters(value) {\n    const buf = Buffer.alloc(4);\n    buf.writeFloatBE(value, 0);\n    return [buf.readUInt16BE(0), buf.readUInt16BE(2)];\n}\n\nconst meters = flow.get('latest_meters') || [];\nif (meters.length === 0) {\n    return null;\n}\n\nconst meterIndex = Number(env.get('METER_INDEX') || 0);\nconst meter = meters[meterIndex] || meters[0];\nif (!meter || !meter.readings) {\n    return null;\n}\n\nconst r = meter.readings;\nconst phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];\nconst allPhasesPresent = phases.every((v) => typeof v === 'number' && !Number.isNaN(v));\nconst totalActiveW = allPhasesPresent ? phases.reduce((a, b) => a + b, 0) : undefined;\n\nconst valueMap = {\n    [REGISTER_ADDRESSES.active_power_l1_w]: r.active_power_l1_w,\n    [REGISTER_ADDRESSES.active_power_l2_w]: r.active_power_l2_w,\n    [REGISTER_ADDRESSES.active_power_l3_w]: r.active_power_l3_w,\n    [REGISTER_ADDRESSES.active_power_total_w]: totalActiveW,\n    [REGISTER_ADDRESSES.voltage_l1_v]: r.voltage_l1_v,\n    [REGISTER_ADDRESSES.voltage_l2_v]: r.voltage_l2_v,\n    [REGISTER_ADDRESSES.voltage_l3_v]: r.voltage_l3_v,\n    [REGISTER_ADDRESSES.current_l1_a]: r.current_l1_a,\n    [REGISTER_ADDRESSES.current_l2_a]: r.current_l2_a,\n    [REGISTER_ADDRESSES.current_l3_a]: r.current_l3_a,\n    [REGISTER_ADDRESSES.power_factor]: r.power_factor,\n    [REGISTER_ADDRESSES.total_energy_kwh]: r.total_energy_kwh,\n    [REGISTER_ADDRESSES.frequency_hz]: r.frequency_hz\n};\n\nconst writes = [];\nfor (const [addrStr, value] of Object.entries(valueMap)) {\n    if (typeof value !== 'number' || Number.isNaN(value)) continue;\n    const addr = Number(addrStr);\n    const [high, low] = float32ToRegisters(value);\n    writes.push({ payload: { value: high, register: addr, fc: 'FC6' } });\n    writes.push({ payload: { value: low, register: addr + 1, fc: 'FC6' } });\n}\n\nflow.set('modbus_last_write_count', writes.length);\nflow.set('modbus_last_write_meter', meter.meter_id);\n\nnode.send([writes]);\nreturn null;\n",
+    "func": "// Push the latest meter snapshot into the modbus-server holding registers.\n\nconst REGISTER_ADDRESSES = {\n    active_power_l1_w: 19000,\n    active_power_l2_w: 19002,\n    active_power_l3_w: 19004,\n    active_power_total_w: 19006,\n    voltage_l1_v: 19020,\n    voltage_l2_v: 19022,\n    voltage_l3_v: 19024,\n    current_l1_a: 19040,\n    current_l2_a: 19042,\n    current_l3_a: 19044,\n    power_factor: 19060,\n    total_energy_kwh: 19062,\n    frequency_hz: 19064\n};\n\nfunction float32ToRegisters(value) {\n    const buf = Buffer.alloc(4);\n    buf.writeFloatBE(value, 0);\n    return [buf.readUInt16BE(0), buf.readUInt16BE(2)];\n}\n\nconst meters = global.get('latest_meters') || [];\nif (meters.length === 0) {\n    return null;\n}\n\nconst meterIndex = Number(env.get('METER_INDEX') || 0);\nconst meter = meters[meterIndex] || meters[0];\nif (!meter || !meter.readings) {\n    return null;\n}\n\nconst r = meter.readings;\nconst phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];\nconst allPhasesPresent = phases.every((v) => typeof v === 'number' && !Number.isNaN(v));\nconst totalActiveW = allPhasesPresent ? phases.reduce((a, b) => a + b, 0) : undefined;\n\nconst valueMap = {\n    [REGISTER_ADDRESSES.active_power_l1_w]: r.active_power_l1_w,\n    [REGISTER_ADDRESSES.active_power_l2_w]: r.active_power_l2_w,\n    [REGISTER_ADDRESSES.active_power_l3_w]: r.active_power_l3_w,\n    [REGISTER_ADDRESSES.active_power_total_w]: totalActiveW,\n    [REGISTER_ADDRESSES.voltage_l1_v]: r.voltage_l1_v,\n    [REGISTER_ADDRESSES.voltage_l2_v]: r.voltage_l2_v,\n    [REGISTER_ADDRESSES.voltage_l3_v]: r.voltage_l3_v,\n    [REGISTER_ADDRESSES.current_l1_a]: r.current_l1_a,\n    [REGISTER_ADDRESSES.current_l2_a]: r.current_l2_a,\n    [REGISTER_ADDRESSES.current_l3_a]: r.current_l3_a,\n    [REGISTER_ADDRESSES.power_factor]: r.power_factor,\n    [REGISTER_ADDRESSES.total_energy_kwh]: r.total_energy_kwh,\n    [REGISTER_ADDRESSES.frequency_hz]: r.frequency_hz\n};\n\nconst writes = [];\nfor (const [addrStr, value] of Object.entries(valueMap)) {\n    if (typeof value !== 'number' || Number.isNaN(value)) continue;\n    const addr = Number(addrStr);\n    const [high, low] = float32ToRegisters(value);\n    writes.push({ payload: { value: high, register: addr, fc: 'FC6' } });\n    writes.push({ payload: { value: low, register: addr + 1, fc: 'FC6' } });\n}\n\nflow.set('modbus_last_write_count', writes.length);\nflow.set('modbus_last_write_meter', meter.meter_id);\n\nnode.send([writes]);\nreturn null;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -100,7 +86,7 @@
     "type": "comment",
     "z": "tab-modbus",
     "name": "Janitza UMG 96RM holding registers, IEEE 754 big-endian",
-    "info": "Updates the modbus-server's data block whenever the Feeds tab\nemits a new envelope (link-in `sim.envelope`). The 1-second inject node\nis a safety net so the server stays current even if the engine is\npaused.\n\nFor multi-meter exposure: duplicate the writer function and the\nmodbus-server config and point each at a different `METER_INDEX`.\n",
+    "info": "Refreshes the modbus-server data block every second from the\n`latest_meters` global context written by the Feeds tab.\n\nFor multi-meter exposure: duplicate the writer function and the\nmodbus-server config and point each at a different `METER_INDEX`.\n",
     "x": 320,
     "y": 80,
     "wires": []

@@ -82,7 +82,7 @@ import asyncio
 from pymodbus.client import AsyncModbusTcpClient
 
 async def main():
-    c = AsyncModbusTcpClient('localhost', port=502)
+    c = AsyncModbusTcpClient('localhost', port=5020)
     await c.connect()
     rsp = await c.read_holding_registers(address=19000, count=2, slave=1)
     high, low = rsp.registers
@@ -95,7 +95,7 @@ asyncio.run(main())
 PY
 ```
 
-(`kubectl -n orce port-forward svc/facis-orce 502:502` first.)
+(`kubectl -n orce port-forward svc/facis-orce 5020:5020` first.)
 
 ## Observability
 

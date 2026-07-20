@@ -154,7 +154,7 @@ modbus:
   # -- Enable Modbus TCP server
   enabled: true
   # -- Modbus listen port inside the container
-  port: 502
+  port: 5020
 
 # ---------------------------------------------------------------------------
 # Service
@@ -165,7 +165,7 @@ service:
   # -- HTTP service port
   httpPort: 8080
   # -- Modbus service port
-  modbusPort: 502
+  modbusPort: 5020
   # -- Additional annotations for the Service
   annotations: {}
 
