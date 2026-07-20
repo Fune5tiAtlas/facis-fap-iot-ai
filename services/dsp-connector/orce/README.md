@@ -38,9 +38,25 @@ orce/
 
 ## State storage
 
-The flow uses two PVC-backed JSON files under `/data/dsp-state/`:
-- `transfers.json` — the transfer-process map keyed by `tp-...` id
-- `negotiations.json` — the negotiation map keyed by `neg-...` id
+Transfer-process and negotiation state is persisted in **PostgreSQL**, reached
+via `DSP_PG_URI`. The `facis-dsp-connector` chart renders a dedicated Postgres
+StatefulSet when `dsp.pg.enabled` (see
+[`helm/facis-dsp-connector/README.md`](../helm/facis-dsp-connector/README.md)).
+The `facis-dsp-state` flow owns the store:
+
+- **Bootstrap**: `CREATE TABLE IF NOT EXISTS` for `dsp_transfers` and
+  `dsp_negotiations` (`id TEXT PRIMARY KEY`, `doc JSONB`) on every boot.
+- **One-time migration**: when a table is empty it seeds from the legacy
+  PVC file at `/data/dsp-state/transfers.json` / `negotiations.json` if one is
+  present, so an upgrade from the old file-backed store carries its rows
+  forward.
+- **Runtime**: each map is loaded into Node-RED global context
+  (`global.get('transfers')` / `global.get('negotiations')`, both
+  global-scoped); every change is written back transactionally
+  (`BEGIN`/`COMMIT`, `ROLLBACK` on failure) as a snapshot to the table.
+- **Boot retry**: a restore failure surfaces on the tab's catch node, which
+  rate-limits a retry — covering Postgres still starting when this instance
+  boots.
 
 The catalogue is **derived** from the FACIS Data Sink's queryable store (the
 Trino/Iceberg lakehouse — see [`docs/architecture/fap-role-mapping.md`](../../../docs/architecture/fap-role-mapping.md)).
@@ -60,9 +76,13 @@ The startup file-read seeds the catalogue within milliseconds at boot; the
 derivation replaces it once Trino answers and re-runs every 10 minutes. The
 overlay file is a read-only ConfigMap mount at `/data/dsp-config/datasets.json`.
 
-**Single-replica only**: the file-based state is not multi-replica safe.
-The ORCE pod must run with `replicas: 1`. Postgres backing is out of scope
-for this migration.
+**Single-replica only**: state now survives pod restart and reschedule — it
+lives in Postgres, not in pod-local files. The `replicas: 1` constraint remains,
+but it is a property of the Node-RED runtime, not of the state store: between
+writes the authoritative copy of each map is the in-memory global context of a
+single pod, with a single writer. Running ORCE with more than one replica would
+require sharing that context across instances, which is out of scope for this
+demonstrator.
 
 ## Endpoint paths
 
