@@ -12,9 +12,9 @@ Architecture (all internal to Stackable K8s cluster):
         → InvokeHTTP (POST to Trino REST /v1/statement, Basic auth)
 
 Usage:
-    python scripts/setup_nifi.py --env-file .env.cluster
-    python scripts/setup_nifi.py --env-file .env.cluster --dry-run
-    python scripts/setup_nifi.py --env-file .env.cluster --teardown
+    python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
+    python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster --dry-run
+    python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster --teardown
 
 Prerequisites:
     pip install -e ".[lakehouse]"

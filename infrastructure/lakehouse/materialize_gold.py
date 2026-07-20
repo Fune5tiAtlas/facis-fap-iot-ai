@@ -9,13 +9,13 @@ once Silver is materialized.
 
 Usage:
     # Full materialization (default)
-    python scripts/materialize_gold.py --env-file .env.cluster
+    python infrastructure/lakehouse/materialize_gold.py --env-file .env.cluster
 
     # Single table only
-    python scripts/materialize_gold.py --env-file .env.cluster --table net_grid_hourly
+    python infrastructure/lakehouse/materialize_gold.py --env-file .env.cluster --table net_grid_hourly
 
     # Dry run (show SQL without executing)
-    python scripts/materialize_gold.py --env-file .env.cluster --dry-run
+    python infrastructure/lakehouse/materialize_gold.py --env-file .env.cluster --dry-run
 
 Prerequisites:
     pip install -e ".[lakehouse]"

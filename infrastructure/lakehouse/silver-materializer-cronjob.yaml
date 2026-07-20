@@ -1,45 +1,46 @@
 # ---------------------------------------------------------------------------
-# Gold Layer Materializer — Kubernetes CronJob
+# Silver Layer Materializer — Kubernetes CronJob
 #
-# Runs materialize_gold.py on a schedule to convert Gold views into
-# materialized Iceberg tables for fast query performance.
-#
-# Schedule offset: runs at minute 30, every 6 hours (after Silver
-# materialization has had time to process new data).
+# Runs materialize_silver.py on a schedule to incrementally INSERT new
+# Bronze rows into Silver Iceberg tables.  Uses watermark tracking so
+# only rows newer than the last run are processed. This manifest is the
+# single source of truth for the Silver materializer; the equivalent Helm
+# template in services/simulation/helm/facis-simulation is disabled by
+# default and deprecated in favour of this file.
 #
 # Prerequisites:
 #   1. ConfigMap with scripts:
-#      kubectl create configmap facis-gold-scripts \
-#        --from-file=materialize_gold.py=scripts/materialize_gold.py \
-#        --from-file=setup_lakehouse.py=scripts/setup_lakehouse.py \
+#      kubectl create configmap facis-silver-scripts \
+#        --from-file=materialize_silver.py=infrastructure/lakehouse/materialize_silver.py \
+#        --from-file=setup_lakehouse.py=infrastructure/lakehouse/setup_lakehouse.py \
 #        -n stackable
 #
-#   2. Secret with credentials (shared with Silver materializer):
+#   2. Secret with credentials:
 #      kubectl create secret generic facis-lakehouse-credentials \
 #        --from-env-file=.env.cluster -n stackable
 # ---------------------------------------------------------------------------
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: facis-gold-materializer
+  name: facis-silver-materializer
   namespace: stackable
   labels:
-    app.kubernetes.io/name: facis-gold-materializer
+    app.kubernetes.io/name: facis-silver-materializer
     app.kubernetes.io/component: lakehouse
     app.kubernetes.io/part-of: facis-fap-iot-ai
 spec:
-  schedule: "30 */6 * * *"          # Every 6 hours at minute 30
+  schedule: "*/10 * * * *"          # Every 10 minutes
   concurrencyPolicy: Forbid         # Skip if previous run is still active
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 2
-      activeDeadlineSeconds: 1800   # 30 min max
+      backoffLimit: 1
+      activeDeadlineSeconds: 540    # 9 min max (before next schedule)
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: facis-gold-materializer
+            app.kubernetes.io/name: facis-silver-materializer
         spec:
           restartPolicy: Never
           securityContext:
@@ -68,7 +69,7 @@ spec:
             args:
             - |
               export PYTHONPATH=/deps:/scripts
-              python /scripts/materialize_gold.py --env-file /config/.env
+              python /scripts/materialize_silver.py --env-file /config/.env
             env:
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"
@@ -104,7 +105,7 @@ spec:
               sizeLimit: 64Mi
           - name: scripts
             configMap:
-              name: facis-gold-scripts
+              name: facis-silver-scripts
           - name: credentials
             secret:
               secretName: facis-lakehouse-credentials

@@ -14,9 +14,9 @@
 #      the JAR to /opt/nifi/jdbc/. Simpler but ephemeral (lost on restart).
 #
 # Usage:
-#   scripts/provision_nifi_jdbc.sh              # PVC mode
-#   scripts/provision_nifi_jdbc.sh --direct     # Direct kubectl exec mode
-#   scripts/provision_nifi_jdbc.sh --verify     # Check if JAR exists on NiFi pods
+#   infrastructure/lakehouse/provision_nifi_jdbc.sh              # PVC mode
+#   infrastructure/lakehouse/provision_nifi_jdbc.sh --direct     # Direct kubectl exec mode
+#   infrastructure/lakehouse/provision_nifi_jdbc.sh --verify     # Check if JAR exists on NiFi pods
 #
 # Prerequisites:
 #   - kubectl configured with cluster access
@@ -119,7 +119,7 @@ provision_pvc() {
         echo ""
         log "Next steps:"
         log "  1. Patch the NiFi cluster to mount the PVC (see k8s/nifi/nifi-jdbc-volume-patch.yaml)"
-        log "  2. Run: python scripts/setup_nifi.py --env-file .env.cluster"
+        log "  2. Run: python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster"
     else
         error "Provisioner job did not complete within 120s."
         kubectl logs -n "$NAMESPACE" job/nifi-jdbc-provisioner --tail=20

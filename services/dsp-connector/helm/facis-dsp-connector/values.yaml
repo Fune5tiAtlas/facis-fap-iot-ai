@@ -127,14 +127,14 @@ dsp:
     keySecret: "facis-dsp-connector-identity-key"
   # -- Trino connection used by facis-dsp-data.json's data-serving query.
   #    Matches the live cluster's internal endpoint + demo credentials
-  #    already used by services/simulation/scripts/setup_nifi.py (same
+  #    already used by infrastructure/lakehouse/setup_nifi.py (same
   #    physical Trino coordinator, same trino-users Secret).
   trino:
     url: https://trino-coordinator.stackable.svc.cluster.local:8443
     catalog: fap-iotai-stackable
     user: admin
     # -- Must match the live cluster's trino-users Secret password (see
-    #    services/simulation/scripts/setup_nifi.py's TRINO_PASSWORD).
+    #    infrastructure/lakehouse/setup_nifi.py's TRINO_PASSWORD).
     #    Left blank by default — set via --set or a values override file,
     #    never commit the real value here.
     password: ""

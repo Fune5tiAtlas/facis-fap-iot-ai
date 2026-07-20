@@ -30,9 +30,9 @@ MQTT → Kafka Topic Mapping (Smart City):
     facis/city/weather         → sim.smart_city.weather
 
 Usage:
-    python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
-    python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
-    python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --teardown
+    python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
+    python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
+    python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --teardown
 
 Prerequisites:
     pip install -e ".[lakehouse]"

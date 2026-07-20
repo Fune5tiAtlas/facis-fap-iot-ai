@@ -132,13 +132,13 @@ Every message arriving in a Kafka Bronze topic has this structure:
 
 ```bash
 # Deploy NiFi pipeline (requires NiFi running)
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
 
 # Dry run (preview only)
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
 
 # Teardown
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --teardown
 ```
 
 Environment:
@@ -154,7 +154,7 @@ In the production cluster, all connections use Stackable TLS (PKCS12 keystores
 mounted at `/stackable/server_tls/`):
 
 ```bash
-python scripts/setup_nifi_mqtt_to_kafka.py \
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py \
     --env-file .env.cluster \
     --cluster
 ```
@@ -209,7 +209,7 @@ pytest tests/integration/test_mqtt_kafka_pipeline.py -v -k "TestMetadataEnrichme
 # Start infrastructure (kind/minikube cluster — see ../guides/setup.md)
 
 # Deploy NiFi pipeline
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
 
 # Run integration tests
 pytest tests/integration/test_mqtt_kafka_pipeline.py -v -k "TestEndToEndPipeline"
@@ -228,7 +228,7 @@ pytest tests/integration/test_mqtt_kafka_pipeline.py -v -k "TestEndToEndPipeline
 
 | File | Purpose |
 |------|---------|
-| `scripts/setup_nifi_mqtt_to_kafka.py` | NiFi REST API script to deploy the pipeline |
+| `infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py` | NiFi REST API script to deploy the pipeline |
 | `nifi/templates/mqtt-to-kafka-bronze-flow.json` | Portable flow definition (JSON) |
 | `tests/integration/test_mqtt_kafka_pipeline.py` | Unit + integration tests |
 | `docs/pipeline/mqtt-kafka-bronze-pipeline.md` | This documentation |

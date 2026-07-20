@@ -1,3 +1,23 @@
+# ---------------------------------------------------------------------------
+# Gold Layer Materializer — Kubernetes CronJob
+#
+# Runs materialize_gold.py on a schedule to convert Gold views into
+# materialized Iceberg tables for fast query performance. This manifest is
+# the single source of truth for the Gold materializer; the equivalent Helm
+# template in services/simulation/helm/facis-simulation is disabled by
+# default and deprecated in favour of this file.
+#
+# Prerequisites:
+#   1. ConfigMap with scripts:
+#      kubectl create configmap facis-gold-scripts \
+#        --from-file=materialize_gold.py=infrastructure/lakehouse/materialize_gold.py \
+#        --from-file=setup_lakehouse.py=infrastructure/lakehouse/setup_lakehouse.py \
+#        -n stackable
+#
+#   2. Secret with credentials (shared with Silver materializer):
+#      kubectl create secret generic facis-lakehouse-credentials \
+#        --from-env-file=.env.cluster -n stackable
+# ---------------------------------------------------------------------------
 apiVersion: batch/v1
 kind: CronJob
 metadata:

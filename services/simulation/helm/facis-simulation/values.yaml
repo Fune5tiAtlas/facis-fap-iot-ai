@@ -318,6 +318,8 @@ autoscaling:
 
 # ---------------------------------------------------------------------------
 # Silver Materializer CronJob
+# DEPRECATED: kept disabled; canonical manifest is
+# infrastructure/lakehouse/silver-materializer-cronjob.yaml.
 # ---------------------------------------------------------------------------
 silverMaterializer:
   # -- Enable Silver materializer CronJob (incremental Bronze → Silver)
@@ -351,6 +353,8 @@ silverMaterializer:
 
 # ---------------------------------------------------------------------------
 # Gold Materializer CronJob
+# DEPRECATED: kept disabled; canonical manifest is
+# infrastructure/lakehouse/gold-materializer-cronjob.yaml.
 # ---------------------------------------------------------------------------
 goldMaterializer:
   # -- Enable Gold materializer CronJob (Silver views → Gold Iceberg tables)

@@ -332,10 +332,10 @@ This view uses UNION ALL across: energy consumption spikes (active_power_kw > me
 
 ```bash
 # Create all schemas, tables, and views
-python scripts/setup_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster
 
 # Tear down (drops everything)
-python scripts/setup_lakehouse.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster --teardown
 ```
 
 The script authenticates via Keycloak OIDC and executes DDL statements against Trino.
@@ -344,7 +344,7 @@ The script authenticates via Keycloak OIDC and executes DDL statements against T
 
 ```bash
 # Full WP3 validation (39 checks across all layers)
-python scripts/validate_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/validate_lakehouse.py --env-file .env.cluster
 
 # Legacy demo validation
 python scripts/demo_lakehouse.py --env-file .env.cluster
@@ -364,7 +364,7 @@ The script authenticates via Keycloak OIDC using a `fresh_conn()` helper that ac
 The NiFi pipeline is configured via:
 
 ```bash
-python scripts/setup_nifi.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
 ```
 
 See [Deployment & Operations](../deployment/deployment-operations.md) for full NiFi setup details.
@@ -387,8 +387,8 @@ See [Deployment & Operations](../deployment/deployment-operations.md) for full N
 | Symptom | Cause | Solution |
 |---|---|---|
 | `401 Invalid credentials` during script run | OIDC token expired or wrong `.env.cluster` credentials | Verify `FACIS_OIDC_USERNAME`, `PASSWORD`, and `CLIENT_SECRET` in `.env.cluster`. Tokens are short-lived; scripts use `fresh_conn()` to auto-refresh. |
-| `SCHEMA_NOT_FOUND: Schema 'bronze' does not exist` | Schemas not created yet | Run `python scripts/setup_lakehouse.py --env-file .env.cluster` (without `--teardown`). |
-| Bronze tables exist but are empty | NiFi pipeline not running or Kafka topics have no data | 1) Verify simulation is posting to ORCE/Kafka. 2) Run `python scripts/setup_nifi.py --env-file .env.cluster`. 3) Check NiFi UI for error bulletins. |
+| `SCHEMA_NOT_FOUND: Schema 'bronze' does not exist` | Schemas not created yet | Run `python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster` (without `--teardown`). |
+| Bronze tables exist but are empty | NiFi pipeline not running or Kafka topics have no data | 1) Verify simulation is posting to ORCE/Kafka. 2) Run `python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster`. 3) Check NiFi UI for error bulletins. |
 | `AUTOCOMMIT_WRITE_CONFLICT` errors in NiFi logs | Concurrent Iceberg writes from multiple NiFi tasks | Transient; NiFi automatically retries. Reduce NiFi concurrent task count if persistent. |
 | Gold view returns NULL for price/cost columns | Meter and price data don't overlap at the same hour | Expected for `net_grid_hourly`; use `gold.energy_cost_daily` (daily granularity) which has broader time alignment. |
 | `gold.anomaly_candidates` returns zero rows | No statistical outliers (values within 2σ of mean) | Expected behavior for well-behaved data. The view will populate when genuine outliers appear. |

@@ -177,19 +177,23 @@ The manifest creates a Deployment (0 replicas by default), ClusterIP Service, an
 
 ## 6. Lakehouse Setup
 
+The provisioning and batch tools below live in `infrastructure/lakehouse/`; run
+them from the repo root. Their Python deps come from the simulation package's
+`[lakehouse]` extra (`pip install -e "services/simulation[lakehouse]"`, §3.2).
+
 ### 6.1 Create Bronze/Silver/Gold Schemas
 
 The `setup_lakehouse.py` script authenticates via Keycloak OIDC and creates all Trino objects:
 
 ```bash
 # Create all schemas, tables, and views (24 objects total)
-python scripts/setup_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster
 
 # Preview without executing
-python scripts/setup_lakehouse.py --env-file .env.cluster --dry-run
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster --dry-run
 
 # Tear down everything (views, tables, schemas)
-python scripts/setup_lakehouse.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster --teardown
 ```
 
 Expected output: `24/24 objects created` (9 Bronze tables + 9 Silver views + 12 Gold views).
@@ -202,7 +206,7 @@ The NiFi ingestion pipeline requires the Trino JDBC driver to insert data into B
 
 ```bash
 # Persistent: Creates a PVC and downloads the JAR via a K8s Job
-scripts/provision_nifi_jdbc.sh
+infrastructure/lakehouse/provision_nifi_jdbc.sh
 
 # Then patch the NiFi cluster to mount the PVC
 # See k8s/nifi/nifi-jdbc-volume-patch.yaml for instructions
@@ -212,7 +216,7 @@ scripts/provision_nifi_jdbc.sh
 
 ```bash
 # Downloads JAR directly into each running NiFi pod (lost on restart)
-scripts/provision_nifi_jdbc.sh --direct
+infrastructure/lakehouse/provision_nifi_jdbc.sh --direct
 ```
 
 **Option C: Manual kubectl exec**
@@ -226,7 +230,7 @@ kubectl exec -n stackable <nifi-pod> -- \
 **Verify** the driver is in place:
 
 ```bash
-scripts/provision_nifi_jdbc.sh --verify
+infrastructure/lakehouse/provision_nifi_jdbc.sh --verify
 ```
 
 K8s manifests for the PVC and provisioner Job are in `k8s/nifi/`.
@@ -237,13 +241,13 @@ The `setup_nifi.py` script creates the ingestion pipeline (36 processors for 9 K
 
 ```bash
 # Create NiFi process groups, processors, and connections
-python scripts/setup_nifi.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
 
 # Preview configuration without applying
-python scripts/setup_nifi.py --env-file .env.cluster --dry-run
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster --dry-run
 
 # Remove FACIS process group
-python scripts/setup_nifi.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster --teardown
 ```
 
 ### 6.4 Configure NiFi MQTT → Kafka Bridge (Optional)
@@ -252,10 +256,10 @@ When using the MQTT ORCE flow variant (no rdkafka plugin), data flows via MQTT i
 
 ```bash
 # Create MQTT → Kafka pipeline (9 routes)
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster
 
 # Preview without applying
-python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
+python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster --dry-run
 ```
 
 **Data flow variants:**
@@ -396,10 +400,10 @@ kubectl exec -n stackable <kafka-pod> -- \
 helm uninstall facis-simulation -n facis
 
 # Full Lakehouse teardown (drops all schemas, tables, views)
-python scripts/setup_lakehouse.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster --teardown
 
 # NiFi pipeline teardown (removes FACIS process group)
-python scripts/setup_nifi.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster --teardown
 ```
 
 ---

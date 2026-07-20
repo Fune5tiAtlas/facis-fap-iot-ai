@@ -281,8 +281,9 @@ never a single-shot `InvokeHTTP` POST to `/v1/statement`.** Trino's
 statement REST API is asynchronous — one POST only *queues* the query; a
 client must follow the response's `nextUri` chain to actually drive it to
 completion. `InvokeHTTP` configured for a single POST with all
-relationships auto-terminated (the pattern `services/simulation/scripts/
-setup_nifi.py`'s `create_ingestion_flow()` currently builds) queues every
+relationships auto-terminated (the pattern
+`infrastructure/lakehouse/setup_nifi.py`'s `create_ingestion_flow()`
+currently builds) queues every
 statement and then silently drops it — flowfiles flow through cleanly
 (`in == out` at every hop, zero errors) while nothing ever actually lands
 in the table, with no bulletin and no error — just zero rows. The working

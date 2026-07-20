@@ -1,3 +1,4 @@
+# DEPRECATED: disabled by default; the canonical Silver materializer is infrastructure/lakehouse/silver-materializer-cronjob.yaml.
 {{- if .Values.silverMaterializer.enabled }}
 apiVersion: batch/v1
 kind: CronJob

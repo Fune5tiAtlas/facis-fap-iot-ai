@@ -10,7 +10,7 @@ Runs validation checks against the live Trino cluster:
   5. Cross-layer: Gold aggregations are consistent with Silver
 
 Usage:
-    python scripts/validate_lakehouse.py --env-file .env.cluster
+    python infrastructure/lakehouse/validate_lakehouse.py --env-file .env.cluster
 """
 
 from __future__ import annotations

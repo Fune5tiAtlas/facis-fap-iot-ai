@@ -16,8 +16,8 @@ WP3 Completion — Silver & Gold layers are production-ready with:
     anomaly_candidates
 
 Usage:
-    python scripts/setup_lakehouse.py --env-file .env.cluster
-    python scripts/setup_lakehouse.py --env-file .env.cluster --teardown
+    python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster
+    python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster --teardown
 
 Prerequisites:
     pip install -e ".[lakehouse]"

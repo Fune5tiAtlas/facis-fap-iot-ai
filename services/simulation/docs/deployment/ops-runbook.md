@@ -656,11 +656,11 @@ The `scripts/` directory contains automation for the full pipeline:
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| `provision_nifi_jdbc.sh` | Provision Trino JDBC driver for NiFi pods | `scripts/provision_nifi_jdbc.sh` (PVC) or `--direct` |
-| `setup_nifi.py` | Deploy NiFi Kafka→Trino ingestion (9 topics, 36 processors) | `python scripts/setup_nifi.py --env-file .env.cluster` |
-| `setup_nifi_mqtt_to_kafka.py` | Deploy NiFi MQTT→Kafka pipeline (9 routes: 5 energy + 4 city) | `python scripts/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster` |
-| `setup_lakehouse.py` | Create Trino Bronze/Silver/Gold schemas (30 objects) | `python scripts/setup_lakehouse.py --env-file .env.cluster` |
-| `validate_lakehouse.py` | WP3 validation: 39 checks across all layers | `python scripts/validate_lakehouse.py --env-file .env.cluster` |
+| `provision_nifi_jdbc.sh` | Provision Trino JDBC driver for NiFi pods | `infrastructure/lakehouse/provision_nifi_jdbc.sh` (PVC) or `--direct` |
+| `setup_nifi.py` | Deploy NiFi Kafka→Trino ingestion (9 topics, 36 processors) | `python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster` |
+| `setup_nifi_mqtt_to_kafka.py` | Deploy NiFi MQTT→Kafka pipeline (9 routes: 5 energy + 4 city) | `python infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py --env-file .env.cluster` |
+| `setup_lakehouse.py` | Create Trino Bronze/Silver/Gold schemas (30 objects) | `python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster` |
+| `validate_lakehouse.py` | WP3 validation: 39 checks across all layers | `python infrastructure/lakehouse/validate_lakehouse.py --env-file .env.cluster` |
 | `demo_e2e.py` | Validate end-to-end pipeline (Kafka, JSON schema, correlation) | `python scripts/demo_e2e.py --env-file .env.cluster` |
 | `demo_lakehouse.py` | Validate lakehouse (auth, Bronze rows, Silver/Gold views) | `python scripts/demo_lakehouse.py --env-file .env.cluster` |
 | `generate_seed_datasets.py` | Generate 9 reproducible test scenarios | `python scripts/generate_seed_datasets.py` |

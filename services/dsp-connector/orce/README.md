@@ -129,7 +129,7 @@ which this plan does not touch.
 `facis-dsp-consumer.json` (consumer) drives an already-negotiated transfer,
 follows its access object, and lands the result in `bronze.dsp_ingest` via
 a new `dsp.ingest.raw` Kafka topic (see
-`services/simulation/scripts/setup_lakehouse.py` /
+`infrastructure/lakehouse/setup_lakehouse.py` /
 `setup_nifi.py`'s `--add-bronze-table` / `--add-topic` flags). It does not
 drive contract negotiation itself and does not attach a VP to its own
 outbound calls to the provider — both are known, explicitly scoped-out
@@ -185,9 +185,10 @@ with no obvious cause.
 export KUBECONFIG=k8s/K8s-cluster-IONOS-cloud.yaml
 
 # 1. Provision Bronze + NiFi (additive, does not touch the 9 live sim flows)
-cd services/simulation
-python scripts/setup_lakehouse.py --env-file .env.cluster --add-bronze-table dsp.ingest.raw
-python scripts/setup_nifi.py --env-file .env.cluster --add-topic dsp.ingest.raw
+#    Run from the repo root. The Python deps come from the simulation package:
+#    pip install -e "services/simulation[lakehouse]"
+python infrastructure/lakehouse/setup_lakehouse.py --env-file services/simulation/.env.cluster --add-bronze-table dsp.ingest.raw
+python infrastructure/lakehouse/setup_nifi.py --env-file services/simulation/.env.cluster --add-topic dsp.ingest.raw
 
 # 2. Apply the updated Ingress
 kubectl apply -f infrastructure/ingress/facis-ingress.yaml

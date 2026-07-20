@@ -34,7 +34,7 @@ import pytest
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Test configuration — matches scripts/setup_nifi_mqtt_to_kafka.py
+# Test configuration — matches infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py
 # ---------------------------------------------------------------------------
 
 MQTT_BROKER_HOST = "localhost"
@@ -413,7 +413,7 @@ class TestEndToEndPipeline:
 
     These tests require:
     1. MQTT + Kafka reachable (mqtt + kafka)
-    2. NiFi pipeline deployed (scripts/setup_nifi_mqtt_to_kafka.py)
+    2. NiFi pipeline deployed (infrastructure/lakehouse/setup_nifi_mqtt_to_kafka.py)
 
     The tests publish MQTT messages and verify they arrive in the correct
     Kafka Bronze topics with proper metadata enrichment.

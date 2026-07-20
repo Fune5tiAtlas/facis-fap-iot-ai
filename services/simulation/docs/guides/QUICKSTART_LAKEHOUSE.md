@@ -27,6 +27,11 @@ pip install -e ".[lakehouse]"
 
 This installs: `trino>=0.328.0`, `requests>=2.31.0`, `python-dotenv>=1.0.0`, `tabulate>=0.9.0`.
 
+> The lakehouse provisioning tools now live in `infrastructure/lakehouse/`. Run
+> them from the repo root; their Python deps still come from the simulation
+> package's `[lakehouse]` extra installed above. The steps below reference the
+> `.env.cluster` you create in Step 2 as `services/simulation/.env.cluster`.
+
 ## Step 2: Configure Credentials
 
 ```bash
@@ -45,7 +50,7 @@ The service endpoint defaults (`FACIS_KEYCLOAK_URL`, `FACIS_TRINO_HOST`, etc.) a
 ## Step 3: Create the Lakehouse
 
 ```bash
-python scripts/setup_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_lakehouse.py --env-file services/simulation/.env.cluster
 ```
 
 This creates:
@@ -62,7 +67,7 @@ Expected output: 24 `CREATE` statements executed without errors.
 Bronze tables are populated by the NiFi pipeline consuming from Kafka. To check if data is flowing:
 
 ```bash
-python scripts/validate_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/validate_lakehouse.py --env-file services/simulation/.env.cluster
 ```
 
 Expected output: **39/39 checks PASSED**
@@ -119,7 +124,7 @@ Full Gold view inventory (12 views):
 To remove all views, tables, and schemas:
 
 ```bash
-python scripts/setup_lakehouse.py --env-file .env.cluster --teardown
+python infrastructure/lakehouse/setup_lakehouse.py --env-file services/simulation/.env.cluster --teardown
 ```
 
 ## Troubleshooting

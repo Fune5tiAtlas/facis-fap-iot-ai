@@ -1,3 +1,4 @@
+# DEPRECATED: disabled by default; the canonical Gold materializer is infrastructure/lakehouse/gold-materializer-cronjob.yaml.
 {{- if .Values.goldMaterializer.enabled }}
 apiVersion: batch/v1
 kind: CronJob

@@ -8,16 +8,16 @@ so that only new Bronze rows are processed on each run.
 
 Usage:
     # Incremental refresh (default — only new rows since last watermark)
-    python scripts/materialize_silver.py --env-file .env.cluster
+    python infrastructure/lakehouse/materialize_silver.py --env-file .env.cluster
 
     # Full refresh (truncate + reload all data)
-    python scripts/materialize_silver.py --env-file .env.cluster --full-refresh
+    python infrastructure/lakehouse/materialize_silver.py --env-file .env.cluster --full-refresh
 
     # Single table only
-    python scripts/materialize_silver.py --env-file .env.cluster --table energy_meter
+    python infrastructure/lakehouse/materialize_silver.py --env-file .env.cluster --table energy_meter
 
     # Dry run (show SQL without executing)
-    python scripts/materialize_silver.py --env-file .env.cluster --dry-run
+    python infrastructure/lakehouse/materialize_silver.py --env-file .env.cluster --dry-run
 
 Prerequisites:
     pip install -e ".[lakehouse]"

@@ -270,11 +270,13 @@ simulation-service/
 ├── config/
 │   ├── default.yaml               Default configuration
 │   └── development.yaml           Dev-specific overrides
-├── scripts/
-│   ├── setup_lakehouse.py         Create Bronze/Silver/Gold tables in Trino
-│   ├── setup_nifi.py              Configure NiFi pipeline
+├── scripts/                       Simulation demo & seed tools only
 │   ├── demo_e2e.py                End-to-end demo script
-│   └── demo_lakehouse.py          Lakehouse query demo
+│   ├── demo_lakehouse.py          Lakehouse query demo
+│   └── generate_seed_datasets.py  Seed dataset generator
+│   # Lakehouse provisioning/batch tools (setup_lakehouse.py, setup_nifi.py,
+│   # materialize_*.py, validate_lakehouse.py, provision_nifi_jdbc.sh) now
+│   # live in infrastructure/lakehouse/ (see its README).
 ├── orce/                          ORCE (Node-RED) configuration
 │   ├── Dockerfile                 Custom ORCE image with rdkafka patch
 │   ├── rdkafka-patch.js           mTLS patch for node-red-contrib-rdkafka

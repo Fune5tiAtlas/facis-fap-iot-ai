@@ -258,24 +258,28 @@ Before handing off to ATLAS for application deployment, verify:
 
 Once all prerequisites are verified, ATLAS deployment proceeds with:
 
+The provisioning tools live in `infrastructure/lakehouse/`; run them from the
+repo root. Their Python deps come from the simulation package's `[lakehouse]`
+extra.
+
 ```bash
-# 1. Install Python dependencies
-pip install -e ".[lakehouse]"
+# 1. Install Python dependencies (from the simulation package)
+pip install -e "services/simulation[lakehouse]"
 
 # 2. Create Bronze/Silver/Gold schemas (30 objects)
-python scripts/setup_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster
 
 # 3. Provision Trino JDBC driver on NiFi pods
-scripts/provision_nifi_jdbc.sh --direct
+infrastructure/lakehouse/provision_nifi_jdbc.sh --direct
 
 # 4. Configure NiFi Kafka→Bronze pipeline (36 processors)
-python scripts/setup_nifi.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
 
 # 5. Deploy simulation service (Helm)
 helm install facis-sim ./helm/facis-simulation -n facis --create-namespace
 
 # 6. Validate end-to-end
-python scripts/validate_lakehouse.py --env-file .env.cluster
+python infrastructure/lakehouse/validate_lakehouse.py --env-file .env.cluster
 ```
 
 Full deployment procedures: see [Deployment & Operations Guide](deployment-operations.md).

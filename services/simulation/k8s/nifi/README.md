@@ -28,7 +28,7 @@ kubectl wait --for=condition=complete job/nifi-jdbc-provisioner -n stackable --t
 #    (See nifi-jdbc-volume-patch.yaml for instructions)
 
 # 5. Configure the ingestion pipeline
-python scripts/setup_nifi.py --env-file .env.cluster
+python infrastructure/lakehouse/setup_nifi.py --env-file .env.cluster
 ```
 
 ## Automated Alternative
@@ -36,5 +36,5 @@ python scripts/setup_nifi.py --env-file .env.cluster
 Use the provisioning script for a single-command setup:
 
 ```bash
-scripts/provision_nifi_jdbc.sh
+infrastructure/lakehouse/provision_nifi_jdbc.sh
 ```

@@ -706,7 +706,7 @@ kubectl logs -n facis <orce-pod> -f | grep -i "trino\|query\|timeout"
 | Cause | Fix |
 |-------|-----|
 | Trino not reachable | Verify `trino.host` and `trino.port` in values; test DNS: `kubectl exec <orce-pod> -- nslookup trino` |
-| Tables not created | Run lakehouse setup: `python scripts/setup_lakehouse.py --env-file .env.cluster` |
+| Tables not created | Run lakehouse setup: `python infrastructure/lakehouse/setup_lakehouse.py --env-file .env.cluster` |
 | Wrong catalog/schema | Verify `trino.catalog` and `trino.schema` values match actual Trino setup |
 | Query timeout too short | Increase timeout in Tab 3 flow (default 30s); adjust complex query complexity |
 
