@@ -1,0 +1,328 @@
+{{- if .Values.dedicatedOrce.enabled }}
+# Dedicated ORCE (Node-RED) runtime for the DSP connector (FAP role
+# separation — see docs/architecture/fap-role-mapping.md). Runs this chart's
+# flow set on its own pod, isolated from the simulation/SFTP/AI-UI flows on
+# the shared ORCE pod. Single replica: DSP state is file-based (not
+# multi-replica safe) and the runtime PVC is RWO.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-orce
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-orce
+spec:
+  replicas: 1
+  strategy:
+    # RWO PVCs (orce-data, dsp-state) cannot be bound by two pods at once, so
+    # the new pod must not start until the old one releases them.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "facis-dsp-connector.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dsp-orce
+  template:
+    metadata:
+      labels:
+        {{- include "facis-dsp-connector.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dsp-orce
+    spec:
+      serviceAccountName: {{ include "facis-dsp-connector.serviceAccountName" . }}
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        # 1. Seed the runtime home from the image's baked /data on first boot
+        #    (empty PVC), then ensure the DSP state + config mount points
+        #    exist. Node-RED runs as uid 1000, so hand ownership over.
+        - name: init-data
+          image: "{{ .Values.dedicatedOrce.image.repository }}:{{ .Values.dedicatedOrce.image.tag }}"
+          imagePullPolicy: {{ .Values.dedicatedOrce.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ ! -f /mnt/orce-data/package.json ]; then
+                echo "[init-data] seeding /mnt/orce-data from image /data"
+                cp -a /data/. /mnt/orce-data/
+              else
+                echo "[init-data] /mnt/orce-data already seeded"
+              fi
+              mkdir -p /mnt/orce-data/dsp-state /mnt/orce-data/dsp-config
+              chown -R 1000:1000 /mnt/orce-data
+              echo "[init-data] done"
+          volumeMounts:
+            - name: orce-data
+              mountPath: /mnt/orce-data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+        # 2. Ensure the npm packages the DSP flows need are present, and
+        #    overlay the FACIS rdkafka SSL patch (the Stackable Kafka cluster
+        #    is mTLS-only; stock node-red-contrib-rdkafka drops the ssl*
+        #    fields). Same structure as infrastructure/orce/init-deps-patch.yaml
+        #    but with only the packages the DSP flows use — no modbus/sftp/
+        #    csv-parse/seedrandom. cyrus-sasl-dev is never installed: the
+        #    cluster uses mTLS, not SASL, and libsasl2 is absent at runtime.
+        - name: init-deps
+          image: "{{ .Values.dedicatedOrce.image.repository }}:{{ .Values.dedicatedOrce.image.tag }}"
+          imagePullPolicy: {{ .Values.dedicatedOrce.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              cd /mnt/orce-data
+              if [ ! -f package.json ]; then
+                echo "[init-deps] package.json missing - init-data has not run yet; skipping"
+                exit 0
+              fi
+              PKGS="node-red-contrib-rdkafka jose@5.10.0 jsonld@9.0.0 @gaia-x/json-web-signature-2020@2.3.0 node-red-contrib-mongodb4@3.4.0"
+              MISSING=""
+              for p in $PKGS; do
+                if [ ! -d "node_modules/$p" ]; then MISSING="$MISSING $p"; fi
+              done
+
+              # Detect whether the existing librdkafka was built with OpenSSL.
+              # It needs SSL to connect to the FACIS Stackable Kafka brokers.
+              # The .so lives at build/deps after node-rdkafka's gyp build.
+              NEEDS_REBUILD=0
+              SYM_FILE=/mnt/orce-data/node_modules/node-rdkafka/build/deps/librdkafka.so.1
+              if [ ! -f "$SYM_FILE" ]; then
+                echo "[init-deps] librdkafka.so.1 missing — will rebuild"
+                NEEDS_REBUILD=1
+              elif strings "$SYM_FILE" 2>/dev/null | grep -q "OpenSSL not available at build time"; then
+                echo "[init-deps] librdkafka.so.1 lacks OpenSSL — will rebuild"
+                NEEDS_REBUILD=1
+              elif ldd "$SYM_FILE" 2>&1 | grep -q "libsasl2"; then
+                # libsasl2 is not in the runtime container; if the build linked
+                # it, dynamic load fails. We never use SASL — only mTLS.
+                echo "[init-deps] librdkafka.so.1 links libsasl2 (not present at runtime) — will rebuild"
+                NEEDS_REBUILD=1
+              fi
+
+              if [ -n "$MISSING" ] || [ "$NEEDS_REBUILD" = "1" ]; then
+                # Build deps required to compile librdkafka with SSL.
+                # cyrus-sasl-dev is intentionally OMITTED — the FACIS Kafka cluster
+                # uses mTLS, not SASL, and the runtime container doesn't have
+                # libsasl2 (linking against it would break dynamic loading).
+                echo "[init-deps] installing build toolchain (apk)"
+                apk add --no-cache --quiet build-base python3 linux-headers \
+                                          openssl-dev zlib-dev \
+                  || echo "[init-deps] WARN: apk install partially failed"
+              fi
+
+              if [ -n "$MISSING" ]; then
+                echo "[init-deps] installing missing packages:$MISSING"
+                for p in $MISSING; do
+                  echo "[init-deps] >>> $p"
+                  if npm install --save --save-exact --no-audit --no-fund --prefix /mnt/orce-data "$p"; then
+                    echo "[init-deps] OK $p"
+                  else
+                    echo "[init-deps] FAIL $p (continuing)"
+                  fi
+                done
+              else
+                echo "[init-deps] all packages already present"
+              fi
+
+              # Force rebuild of node-rdkafka against system OpenSSL if needed
+              if [ "$NEEDS_REBUILD" = "1" ] && [ -d /mnt/orce-data/node_modules/node-rdkafka ]; then
+                echo "[init-deps] rebuilding node-rdkafka with OpenSSL"
+                rm -rf /mnt/orce-data/node_modules/node-rdkafka /mnt/orce-data/node_modules/node-red-contrib-rdkafka
+                if npm install --save --save-exact --no-audit --no-fund --prefix /mnt/orce-data \
+                     node-red-contrib-rdkafka; then
+                  echo "[init-deps] OK rebuild"
+                else
+                  echo "[init-deps] FAIL rebuild — Kafka producer will not connect"
+                fi
+              fi
+
+              # Overlay FACIS rdkafka SSL patch (idempotent: skip if identical).
+              # Must run AFTER any reinstall that overwrites rdkafka.js. The
+              # patch ConfigMap is mounted optional — tolerate its absence.
+              SRC=/etc/orce-patches/rdkafka-patch.js
+              DST=/mnt/orce-data/node_modules/node-red-contrib-rdkafka/rdkafka/rdkafka.js
+              if [ -f "$SRC" ] && [ -f "$DST" ]; then
+                if ! cmp -s "$SRC" "$DST"; then
+                  cp "$SRC" "$DST"
+                  echo "[init-deps] rdkafka SSL patch applied to $DST"
+                else
+                  echo "[init-deps] rdkafka SSL patch already applied"
+                fi
+              else
+                echo "[init-deps] WARN: cannot apply rdkafka patch (SRC=$SRC DST=$DST)"
+              fi
+              chown -R 1000:1000 /mnt/orce-data/node_modules /mnt/orce-data/package.json 2>/dev/null || true
+              echo "[init-deps] done"
+          volumeMounts:
+            - name: orce-data
+              mountPath: /mnt/orce-data
+            - name: rdkafka-patch
+              mountPath: /etc/orce-patches
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+        # 3. Enable functionExternalModules so function nodes can `require`
+        #    jose (the NF-1 IAM verifier's dependency). Same idempotent,
+        #    marker-fenced patch the shared instance applies via
+        #    infrastructure/orce/init-orce-settings-patch.yaml — mirrored here
+        #    so both runtimes share one settings mechanism. Admin-API auth is
+        #    left to the image default settings.js (which reads
+        #    ORCE_ADMIN_TOKEN from env), so the flow-deploy Job's
+        #    `Authorization: Bearer` header works identically against both.
+        - name: init-settings
+          image: "{{ .Values.dedicatedOrce.image.repository }}:{{ .Values.dedicatedOrce.image.tag }}"
+          imagePullPolicy: {{ .Values.dedicatedOrce.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              SETTINGS=/mnt/orce-data/settings.js
+              if [ ! -f "$SETTINGS" ]; then
+                echo "[init-settings] $SETTINGS missing — init-data has not run yet; skipping"
+                exit 0
+              fi
+              node <<'JS'
+              const fs = require('fs');
+              const path = '/mnt/orce-data/settings.js';
+              const IAM_MARKER = 'FACIS:iam-verify-patch';
+              let src = fs.readFileSync(path, 'utf8');
+              if (src.includes(IAM_MARKER)) {
+                console.log('[init-settings] already applied');
+                process.exit(0);
+              }
+              // Enable functionExternalModules so function nodes can declare
+              // libs: [{var:'jose', module:'jose'}] etc. Off by default in
+              // Node-RED; required by the DSP IAM verify flow.
+              const feBefore = /functionExternalModules\s*:\s*false/;
+              const feAfter = "functionExternalModules: true, // FACIS:iam-verify-patch";
+              if (feBefore.test(src)) {
+                src = src.replace(feBefore, feAfter);
+              } else if (!/functionExternalModules\s*:/.test(src)) {
+                // Setting absent entirely (it defaults off and is often omitted
+                // from settings.js templates). Inject before module.exports's
+                // closing `};` — the LAST top-level `};` in the file so a
+                // commented-out `};` earlier does not trip us.
+                const re = /^\s*\};\s*$/gm;
+                let lastBraceIdx = -1;
+                let m;
+                while ((m = re.exec(src)) !== null) lastBraceIdx = m.index;
+                if (lastBraceIdx === -1) {
+                  console.error('[init-settings] FAIL: closing `};` not found');
+                  process.exit(1);
+                }
+                const inject = '\n    functionExternalModules: true, // FACIS:iam-verify-patch\n';
+                src = src.slice(0, lastBraceIdx) + inject + src.slice(lastBraceIdx);
+              } else {
+                // Present and already true (or another literal) — just stamp
+                // the marker so this container is idempotent on next boot.
+                src = src.replace(/(functionExternalModules\s*:\s*true)/, '$1 /* FACIS:iam-verify-patch */');
+              }
+              // Atomic write so a half-written file never reaches Node-RED.
+              const tmp = path + '.new';
+              fs.writeFileSync(tmp, src);
+              fs.renameSync(tmp, path);
+              console.log('[init-settings] applied (' + src.length + ' bytes)');
+              JS
+              chown 1000:1000 /mnt/orce-data/settings.js 2>/dev/null || true
+          volumeMounts:
+            - name: orce-data
+              mountPath: /mnt/orce-data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      containers:
+        - name: orce
+          image: "{{ .Values.dedicatedOrce.image.repository }}:{{ .Values.dedicatedOrce.image.tag }}"
+          imagePullPolicy: {{ .Values.dedicatedOrce.image.pullPolicy }}
+          env:
+            - name: TZ
+              value: UTC
+            - name: ORCE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "facis-dsp-connector.fullname" . }}-orce-admin
+                  key: token
+            # This connector's own signing key (did:web + Participant VC
+            # self-issuance). The Secret's data key is `privateJwk`, renamed
+            # here to the DSP_CONNECTOR_KEY env the issuance flow reads. Must
+            # be pre-created (see the rollout runbook); not rendered by this
+            # chart.
+            - name: DSP_CONNECTOR_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dsp.iam.keySecret }}
+                  key: privateJwk
+          envFrom:
+            - secretRef:
+                name: {{ include "facis-dsp-connector.fullname" . }}-dsp-secrets
+          ports:
+            - name: orce
+              containerPort: 1880
+              protocol: TCP
+          volumeMounts:
+            - name: orce-data
+              mountPath: /data
+            - name: kafka-certs
+              mountPath: /etc/kafka-certs
+              readOnly: true
+            - name: datasets
+              mountPath: /data/dsp-config
+              readOnly: true
+            - name: dsp-state
+              mountPath: /data/dsp-state
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 1880
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 1880
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.dedicatedOrce.resources | nindent 12 }}
+      volumes:
+        - name: orce-data
+          persistentVolumeClaim:
+            claimName: {{ include "facis-dsp-connector.fullname" . }}-orce-data
+        - name: kafka-certs
+          secret:
+            secretName: {{ .Values.dedicatedOrce.kafkaCertsSecret }}
+            defaultMode: 0400
+        - name: datasets
+          configMap:
+            name: {{ include "facis-dsp-connector.fullname" . }}-orce-datasets
+        - name: dsp-state
+          persistentVolumeClaim:
+            claimName: {{ .Values.dspStatePvc.name }}
+        - name: rdkafka-patch
+          configMap:
+            name: {{ .Values.dedicatedOrce.rdkafkaPatchConfigMap }}
+            optional: true
+{{- end }}

@@ -4,17 +4,48 @@
 # All values are documented inline. Override any value with --set or -f.
 
 # ---------------------------------------------------------------------------
+# Dedicated ORCE runtime (FAP role separation)
+# ---------------------------------------------------------------------------
+# When enabled, this chart deploys its own single-replica ORCE (Node-RED)
+# instance and the flow-deploy Job targets it instead of the shared ORCE
+# pod. Keeps the DSP Provider/Consumer connector runtime separate from the
+# simulation/Data-Sink runtime (see docs/architecture/fap-role-mapping.md).
+dedicatedOrce:
+  enabled: true
+  image:
+    repository: ecofacis/xfsc-orce
+    tag: "2.0.12"
+    pullPolicy: IfNotPresent
+  # -- Admin API bearer token for THIS instance (REQUIRED when enabled).
+  #    Generate with: openssl rand -hex 32
+  adminToken: ""
+  dataPvcSize: 2Gi
+  storageClassName: ""
+  # -- Secret (in the release namespace) holding the Kafka mTLS client cert
+  #    (keys ca.crt/tls.crt/tls.key) used by the kafka-streaming AdminClient.
+  kafkaCertsSecret: facis-kafka-certs
+  # -- ConfigMap holding rdkafka-patch.js (SSL support overlay for
+  #    node-red-contrib-rdkafka; same ConfigMap the shared instance uses).
+  rdkafkaPatchConfigMap: facis-orce-rdkafka-patch
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+# ---------------------------------------------------------------------------
 # ORCE Flow Deployment
 # ---------------------------------------------------------------------------
-# ORCE-native flows on the existing ORCE pod own the DSP control plane.
-# Helm post-install hook deploys the flow ConfigMap to the ORCE Admin API.
-# Endpoints are exposed by the ORCE pod, not this chart.
+# ORCE-native flows own the DSP control plane. Helm post-install hook deploys
+# the flow ConfigMap to the ORCE Admin API. When dedicatedOrce.enabled the Job
+# targets this chart's own ORCE instance and its rendered admin Secret; the
+# orceAdminUrl/adminTokenSecret values below are used only when it is false
+# (flows deploy onto the shared ORCE pod instead).
 orceFlowDeploy:
   # -- Whether to render the ConfigMap + post-install Job that deploy flows
   enabled: true
-  # -- ORCE Admin API base URL (in-cluster)
+  # -- Shared-ORCE Admin API base URL (used only when dedicatedOrce.enabled=false)
   orceAdminUrl: http://facis-orce.orce.svc.cluster.local:1880
-  # -- Secret holding the ORCE admin bearer token under key "token"
+  # -- Shared-ORCE admin bearer token Secret, key "token" (used only when
+  #    dedicatedOrce.enabled=false)
   adminTokenSecret: facis-orce-admin
   # -- Sub-path under the chart's `files/` directory containing flow JSON.
   #    Populate via `services/dsp-connector/helm/facis-dsp-connector/sync-flows.sh`.

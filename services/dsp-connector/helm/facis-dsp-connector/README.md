@@ -4,8 +4,32 @@ Eclipse Dataspace Protocol connector for the FACIS FAP IoT & AI platform.
 
 ## What this chart renders
 
-The DSP control plane is owned by the ORCE pod via Node-RED flows under
-`services/dsp-connector/orce/flows/`.
+The DSP control plane is owned by an ORCE (Node-RED) runtime via the flows
+under `services/dsp-connector/orce/flows/`. By default
+(`dedicatedOrce.enabled=true`) the chart deploys its **own** single-replica
+ORCE instance for that runtime, isolated from the shared ORCE pod (see
+`docs/architecture/fap-role-mapping.md` §Deployment topology). Set
+`dedicatedOrce.enabled=false` to fall back to deploying the flows onto the
+shared ORCE pod instead.
+
+Rendered only when `dedicatedOrce.enabled` (the default):
+
+- `Deployment/<fullname>-orce` + `Service/<fullname>-orce` (port 1880) — the
+  dedicated ORCE runtime. Three init containers: `init-data` seeds the runtime
+  home from the image, `init-deps` installs the DSP flows' npm packages and
+  applies the rdkafka mTLS SSL overlay, `init-settings` enables
+  `functionExternalModules` (jose). Reuses this chart's `-dsp-secrets` Secret
+  (`envFrom`), `-orce-datasets` ConfigMap, and `facis-dsp-state` PVC directly —
+  no cross-chart wiring.
+- `PersistentVolumeClaim/<fullname>-orce-data` — the runtime home
+  (`/data`: settings.js, node_modules, flows). RWO; the Deployment uses
+  `strategy.type: Recreate`.
+- `Secret/<fullname>-orce-admin` (key `token`) — this instance's Admin API
+  bearer token, from `dedicatedOrce.adminToken` (REQUIRED when enabled). The
+  pod reads it as `ORCE_ADMIN_TOKEN`; the flow-deploy Job sends the same value
+  as `Authorization: Bearer`.
+
+Rendered in both modes:
 
 - `ConfigMap/<fullname>-orce-flows` — bundles the flow JSON files from
   `files/orce-flows/`. Source of truth: `services/dsp-connector/orce/flows/`.
@@ -28,14 +52,24 @@ The DSP control plane is owned by the ORCE pod via Node-RED flows under
   issued/self-issued VCs, see `facis-dsp-iam-hub.json`). Unlike the
   prerequisites below, this is entirely within this chart — no cross-chart
   wiring needed. Disable with `dsp.iam.mongo.enabled=false`.
-- `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Fetches the
-  ORCE pod's live flow set, merges this chart's tabs into it by node id
-  (never a full-replace — see the Job script's own comments), and POSTs the
-  merged set back with `Node-RED-Deployment-Type: nodes`.
+- `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Polls the
+  target ORCE Admin API until ready, fetches its live flow set, merges this
+  chart's tabs into it by node id (never a full-replace — see the Job script's
+  own comments), and POSTs the merged set back with
+  `Node-RED-Deployment-Type: nodes`. Targets the dedicated instance's own
+  Service + admin Secret when `dedicatedOrce.enabled`, else the shared pod via
+  `orceFlowDeploy.orceAdminUrl` / `orceFlowDeploy.adminTokenSecret`.
 
-## ORCE chart prerequisites (cross-chart, deploy-time)
+For the dedicated-mode cutover from the shared pod, see the "Rollout: shared →
+dedicated ORCE" runbook in
+[`services/dsp-connector/orce/README.md`](../../orce/README.md).
 
-The ORCE Helm chart (separate repo) must be configured to:
+## ORCE chart prerequisites (shared-pod mode only)
+
+**Only applies when `dedicatedOrce.enabled=false`.** In the default dedicated
+mode the chart's own ORCE Deployment already wires the secrets, ConfigMap, and
+PVC below, so none of this cross-chart setup is needed. In shared-pod mode the
+separate ORCE Helm chart must be configured to:
 
 1. Reference the secrets and config rendered by this chart:
    ```yaml
@@ -92,6 +126,11 @@ The ORCE Helm chart (separate repo) must be configured to:
 
 ## Deploy order
 
+For the default dedicated mode, follow the "Rollout: shared → dedicated ORCE"
+runbook in [`services/dsp-connector/orce/README.md`](../../orce/README.md)
+(new environments skip its shared-pod teardown steps). The shared-pod deploy
+order below applies only when `dedicatedOrce.enabled=false`:
+
 ```sh
 # 1. Sync flows + datasets into the chart's files/ directory
 cd services/dsp-connector/helm/facis-dsp-connector
@@ -114,8 +153,14 @@ helm upgrade orce <orce-chart-path> --reuse-values \
 
 ## ORCE Admin API token
 
-The post-install Job needs a Bearer token in the Secret `facis-orce-admin`
-(key `token`). Create once:
+In the default dedicated mode the chart renders the admin-token Secret itself
+(`<fullname>-orce-admin`) from `dedicatedOrce.adminToken` — generate it with
+`openssl rand -hex 32` and pass it at install (`--set dedicatedOrce.adminToken=...`).
+The dedicated ORCE pod reads it as `ORCE_ADMIN_TOKEN`; the flow-deploy Job
+sends the same value as `Authorization: Bearer`.
+
+Only in shared-pod mode (`dedicatedOrce.enabled=false`) is the manual
+`facis-orce-admin` Secret used instead — create it once:
 
 ```sh
 kubectl create secret generic facis-orce-admin \

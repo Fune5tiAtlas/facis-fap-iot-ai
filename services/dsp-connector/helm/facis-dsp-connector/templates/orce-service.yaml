@@ -1,0 +1,20 @@
+{{- if .Values.dedicatedOrce.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-orce
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-orce
+spec:
+  type: ClusterIP
+  ports:
+    - port: 1880
+      targetPort: orce
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "facis-dsp-connector.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-orce
+{{- end }}

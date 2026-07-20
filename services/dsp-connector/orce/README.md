@@ -1,7 +1,13 @@
 # DSP Connector — ORCE Native Runtime
 
 This directory contains the ORCE Node-RED flows that implement the DSP
-connector's control plane on the shared ORCE pod.
+connector's control plane. They run on the connector's **own dedicated ORCE
+(Node-RED) instance**, deployed by the `facis-dsp-connector` Helm chart when
+`dedicatedOrce.enabled` (the default) — isolated from the simulation/SFTP/AI-UI
+flows that share the other ORCE pod (see
+[`docs/architecture/fap-role-mapping.md`](../../../docs/architecture/fap-role-mapping.md)
+§Deployment topology). Setting `dedicatedOrce.enabled=false` reverts to the
+legacy shared-pod deploy, where these tabs are merged onto the shared ORCE pod.
 
 ## Layout
 
@@ -103,14 +109,131 @@ separate, larger follow-up, not done as part of adding this.
 
 The chart's `sync-flows.sh` copies these files into
 `helm/facis-dsp-connector/files/orce-flows/` (and `orce-config/`) before
-`helm install/upgrade`. The post-install Job fetches the ORCE pod's live
-flow set, merges these tabs into it by node id, and POSTs the merged set
-back to the ORCE Admin API at `${orceAdminUrl}/flows` with
+`helm install/upgrade`. The post-install Job fetches the **target** ORCE
+instance's live flow set (the dedicated instance by default, the shared pod
+when `dedicatedOrce.enabled=false`), merges these tabs into it by node id, and
+POSTs the merged set back to the ORCE Admin API at `${adminUrl}/flows` with
 `Node-RED-Deployment-Type: nodes` — never a full-replace, which would wipe
-every other service's tabs on the shared pod.
+every other tab already on the target instance.
 
-See `helm/facis-dsp-connector/README.md` for the full deploy procedure and
-the ORCE-chart prerequisites (envFrom secrets, volume mounts).
+See `helm/facis-dsp-connector/README.md` for the full deploy procedure and,
+for the shared-pod fallback, the ORCE-chart prerequisites (envFrom secrets,
+volume mounts). The one-time migration from shared pod to dedicated instance
+is the "Rollout: shared → dedicated ORCE" runbook below.
+
+## Rollout: shared → dedicated ORCE
+
+This migrates the DSP flow set off the shared ORCE pod onto the connector's
+own dedicated ORCE instance. It is a one-time cutover per environment; new
+environments install straight into dedicated mode and skip the shared-pod
+teardown (steps 6–7).
+
+Prerequisites in the release namespace (the chart does **not** create these):
+
+- `facis-kafka-certs` — Kafka mTLS client cert (`ca.crt`/`tls.crt`/`tls.key`).
+- `facis-dsp-connector-identity-key` — this connector's signing JWK
+  (key `privateJwk`), wired to the pod as `DSP_CONNECTOR_KEY`.
+- `facis-orce-rdkafka-patch` ConfigMap (key `rdkafka-patch.js`) — the SSL
+  overlay for `node-red-contrib-rdkafka`. Mounted `optional: true`; absence
+  only logs a warning, but without it the Kafka data-plane cannot connect:
+  ```sh
+  kubectl create configmap facis-orce-rdkafka-patch -n <ns> \
+    --from-file=rdkafka-patch.js=services/simulation/orce/rdkafka-patch.js
+  ```
+
+1. **Render + install the dedicated instance.** Sync flows, then install with
+   the required secrets. `dedicatedOrce.adminToken` is this instance's own
+   Admin API bearer token (the dedicated pod reads it from env; the flow-deploy
+   Job sends it as `Authorization: Bearer`):
+   ```sh
+   cd services/dsp-connector/helm/facis-dsp-connector
+   ./sync-flows.sh
+   helm upgrade --install facis-dsp-connector . -n <ns> \
+     --set dsp.hmacSecret=$(openssl rand -hex 32) \
+     --set dsp.trino.password=<live trino-users password> \
+     --set dedicatedOrce.adminToken=$(openssl rand -hex 32)
+   ```
+2. **Wait for the pod to become Ready.** First boot compiles librdkafka in the
+   `init-deps` container (several minutes):
+   ```sh
+   kubectl rollout status deploy/facis-dsp-connector-orce -n <ns> --timeout=15m
+   ```
+3. **Wait for the flow-deploy Job to succeed.** The post-install hook polls the
+   Admin API until it answers, then merges the DSP tabs onto the (empty) live
+   set:
+   ```sh
+   kubectl wait --for=condition=complete job \
+     -l app.kubernetes.io/component=orce-flow-deploy -n <ns> --timeout=10m
+   kubectl logs -l app.kubernetes.io/component=orce-flow-deploy -n <ns>
+   ```
+4. **Smoke-test through the dedicated Service** (port-forward avoids depending
+   on Ingress at this point):
+   ```sh
+   kubectl port-forward svc/facis-dsp-connector-orce -n <ns> 1880:1880 &
+   curl -fsS http://localhost:1880/api/v1/dsp/health
+   curl -fsS -X POST http://localhost:1880/dsp/catalogue/request \
+     -H 'Content-Type: application/json' -d '{}'
+   ```
+5. **Apply the updated Ingress** so external DSP traffic reaches the dedicated
+   Service (`facis-ingress.yaml` routes `/dsp`, `/api/v1/dsp`, `/iam`,
+   `/api/data`, `/.well-known/did.json`,
+   `/.well-known/openid-credential-issuer` to `facis-dsp-connector-orce`;
+   `/api/v1` and the rest stay on the shared `orce` pod):
+   ```sh
+   kubectl apply -f infrastructure/ingress/facis-ingress.yaml
+   ```
+6. **Remove the DSP tabs from the shared ORCE pod.** The DSP tab ids are:
+   `tab-dsp-catalogue`, `tab-dsp-consumer`, `tab-dsp-data`, `tab-dsp-errors`,
+   `tab-dsp-health`, `tab-dsp-iam-hub`, `tab-dsp-iam-issuance`,
+   `tab-dsp-iam-verify`, `tab-dsp-negotiations`, `tab-dsp-state`,
+   `tab-dsp-transfers`. Do **not** POST a filtered full set with
+   `Node-RED-Deployment-Type: full` — full-replace on the shared pod would wipe
+   the simulation/SFTP/AI-UI tabs. Two safe options:
+   - **Editor (simplest, reviewable):** open the shared instance's Node-RED
+     editor, delete each `FACIS DSP — …` tab, and Deploy. Visual and per-tab.
+   - **Disable via a nodes-mode POST** (scriptable — flips each DSP tab to
+     `"disabled": true` without touching any other tab; nodes mode diffs by id
+     so only the posted tab nodes change):
+     ```sh
+     ORCE=http://facis-orce.orce.svc.cluster.local:1880   # shared pod
+     TOKEN=<shared-orce admin token>                      # facis-orce-admin
+     REV=$(curl -sS -H "Authorization: Bearer $TOKEN" -H 'Node-RED-API-Version: v2' \
+       "$ORCE/flows" | jq -r '.rev')
+     TABS='["tab-dsp-catalogue","tab-dsp-consumer","tab-dsp-data","tab-dsp-errors","tab-dsp-health","tab-dsp-iam-hub","tab-dsp-iam-issuance","tab-dsp-iam-verify","tab-dsp-negotiations","tab-dsp-state","tab-dsp-transfers"]'
+     curl -sS -H "Authorization: Bearer $TOKEN" -H 'Node-RED-API-Version: v2' "$ORCE/flows" \
+       | jq -c --argjson tabs "$TABS" --arg rev "$REV" \
+         '{rev:$rev, flows: (.flows | map(if (.type=="tab" and (.id as $i | $tabs|index($i))) then .disabled=true else . end))}' \
+       > /tmp/disable-dsp.json
+     curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+       -H 'Node-RED-API-Version: v2' -H 'Node-RED-Deployment-Type: nodes' \
+       -X POST "$ORCE/flows" --data @/tmp/disable-dsp.json
+     ```
+7. **Hand the `facis-dsp-state` PVC over to the dedicated pod.** It is
+   `ReadWriteOnce`, so the shared pod must release it before the dedicated pod
+   can bind it. On the shared ORCE Deployment it was mounted by an out-of-band
+   patch; remove that volume + volumeMount, then let the shared pod restart:
+   ```sh
+   # VERIFY the live indices first — they are deployment-specific and the
+   # placeholders below (N for the volumeMount, M for the volume) are NOT
+   # authoritative:
+   kubectl get deploy orce -n orce -o json \
+     | jq '.spec.template.spec.containers[0].volumeMounts | to_entries[] | select(.value.name=="dsp-state")'
+   kubectl get deploy orce -n orce -o json \
+     | jq '.spec.template.spec.volumes | to_entries[] | select(.value.name=="dsp-state")'
+   # Then remove both at their real indices:
+   kubectl patch deployment orce -n orce --type=json -p='[
+     {"op":"remove","path":"/spec/template/spec/containers/0/volumeMounts/N"},
+     {"op":"remove","path":"/spec/template/spec/volumes/M"}
+   ]'
+   ```
+   Only after the shared pod has fully terminated (`kubectl rollout status`)
+   will the dedicated pod's `dsp-state` mount bind. If the dedicated pod is
+   stuck `ContainerCreating` on `Multi-Attach`, the shared pod still holds the
+   claim — confirm it is gone before proceeding.
+
+   **Index verification is not optional:** removing the wrong array index
+   silently detaches an unrelated volume from the shared pod. Re-list the
+   indices immediately before patching every time.
 
 ## NF-2: Data Lake HTTP Ingest
 

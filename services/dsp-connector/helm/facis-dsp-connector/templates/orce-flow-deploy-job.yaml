@@ -1,4 +1,8 @@
 {{- if .Values.orceFlowDeploy.enabled }}
+{{- /* Target this chart's own dedicated ORCE instance when enabled, else the
+       shared ORCE pod configured via orceFlowDeploy.* */}}
+{{- $adminUrl := ternary (printf "http://%s-orce.%s.svc.cluster.local:1880" (include "facis-dsp-connector.fullname" .) .Release.Namespace) .Values.orceFlowDeploy.orceAdminUrl .Values.dedicatedOrce.enabled }}
+{{- $tokenSecret := ternary (printf "%s-orce-admin" (include "facis-dsp-connector.fullname" .)) .Values.orceFlowDeploy.adminTokenSecret .Values.dedicatedOrce.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -38,11 +42,11 @@ spec:
           imagePullPolicy: {{ .Values.orceFlowDeploy.jobImage.pullPolicy }}
           env:
             - name: ORCE_ADMIN_URL
-              value: {{ .Values.orceFlowDeploy.orceAdminUrl | quote }}
+              value: {{ $adminUrl | quote }}
             - name: ORCE_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.orceFlowDeploy.adminTokenSecret }}
+                  name: {{ $tokenSecret }}
                   key: token
             - name: PRE_DEPLOY_SLEEP
               value: {{ .Values.orceFlowDeploy.preDeploySleepSeconds | quote }}
@@ -52,6 +56,28 @@ spec:
               set -eu
               echo "[orce-flow-deploy] waiting ${PRE_DEPLOY_SLEEP}s for ORCE readiness..."
               sleep "${PRE_DEPLOY_SLEEP}"
+
+              # Poll the Admin API until it answers before deploying. On a first
+              # install the dedicated ORCE pod may take minutes to come up (the
+              # init-deps container compiles librdkafka), so a fixed sleep is
+              # not enough. 200 = reachable/open, 401 = reachable but auth-gated
+              # — either means the HTTP server is serving; keep waiting on
+              # connection errors (000) or 5xx. Up to 60 tries × 5s = 5 minutes.
+              echo "[orce-flow-deploy] polling ${ORCE_ADMIN_URL}/flows for readiness..."
+              i=0
+              while [ "$i" -lt 60 ]; do
+                CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
+                  -H "Node-RED-API-Version: v2" \
+                  "${ORCE_ADMIN_URL}/flows" || echo 000)
+                if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
+                  echo "[orce-flow-deploy] ORCE reachable (http $CODE)"
+                  break
+                fi
+                i=$((i + 1))
+                echo "[orce-flow-deploy] not ready (http $CODE), retry $i/60"
+                sleep 5
+              done
 
               cd /flows
               # Single atomic POST /flows (v2, Node-RED-Deployment-Type:

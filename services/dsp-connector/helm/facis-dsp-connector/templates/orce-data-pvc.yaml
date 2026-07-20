@@ -1,0 +1,22 @@
+{{- if .Values.dedicatedOrce.enabled }}
+# Node-RED runtime home (/data) for the dedicated ORCE instance: settings.js,
+# installed node_modules, flow files. RWO — the Deployment uses
+# strategy.type: Recreate so a rolling update never double-binds it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-orce-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-orce
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.dedicatedOrce.dataPvcSize }}
+  {{- with .Values.dedicatedOrce.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
