@@ -32,7 +32,7 @@ npm run dev
 
 The Vue development server runs at `http://localhost:5173`. With ORCE running locally, you can also access the UI at `http://localhost:1880/aiInsight/` (with UIBUILDER deployed).
 
-For the full stack (ORCE + Kafka + AI Insight Service), see the main `README.md` for Docker Compose instructions.
+For the full stack (ORCE + Kafka + AI Insight Service), deploy via Helm against a kind/minikube cluster — see the deployment guides under `docs/deployment/`.
 
 ## Key Concepts
 

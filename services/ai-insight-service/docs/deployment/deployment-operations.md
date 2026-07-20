@@ -16,7 +16,7 @@ This document describes the procedures to deploy and operate the FACIS AI Insigh
 | In-Scope (this guide) | Out-of-Scope (pre-existing infrastructure) |
 |---|---|
 | AI Insight Service build and deployment | Kubernetes cluster provisioning |
-| Local Docker Compose stack | Trino cluster deployment |
+| Local Helm/kind stack | Trino cluster deployment |
 | Helm chart installation and configuration | Keycloak identity provider setup |
 | Configuration management (environment variables, Secrets, ConfigMaps) | LLM provider setup |
 | Health checks and monitoring | Redis cluster provisioning |

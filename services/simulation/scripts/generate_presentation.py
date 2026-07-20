@@ -873,7 +873,7 @@ def create_demo_slide(prs):
     steps = [
         (
             "1",
-            "Docker Compose Stack",
+            "Helm-deployed Stack",
             "5 services running: Simulation, MQTT, Kafka, ORCE, Kafka UI",
             ACCENT_BLUE,
         ),

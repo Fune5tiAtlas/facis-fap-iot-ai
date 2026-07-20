@@ -4,10 +4,10 @@ Integration tests for MQTT publisher.
 Tests verify that all simulation feeds are published to correct MQTT topics
 with proper QoS levels and message structures.
 
-NOTE: These tests require a running MQTT broker. Use docker-compose to start one:
-    docker-compose up -d mqtt
-
-Or set MQTT_BROKER and MQTT_PORT environment variables.
+NOTE: These tests require a running MQTT broker (e.g. Mosquitto deployed via
+the Helm chart against a kind/minikube cluster — see
+docs/guides/setup.md). Set MQTT_BROKER and MQTT_PORT environment variables
+to point at it; tests skip automatically if no broker is reachable.
 """
 
 import json

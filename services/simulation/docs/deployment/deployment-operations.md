@@ -4,11 +4,9 @@
 **Version:** 1.0
 **Date:** 07 March 2026
 
-> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** Sections that
-> reference `docker compose` / `docker-compose.yml` (notably §4.2) document
-> the historical local-dev stack, retained for background. The simulation
-> service no longer ships any `docker-compose*.yml`. Current deployment is
-> Helm + Kubernetes (§4.3+) and ORCE-native runtime — see
+> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** The simulation
+> service does not ship any `docker-compose*.yml`. Deployment is Helm +
+> Kubernetes and ORCE-native runtime — see
 > [`../orce-runtime/migration-guide.md`](../orce-runtime/migration-guide.md).
 
 ---
@@ -32,7 +30,7 @@ For platform infrastructure requirements (what must be in place before this guid
 
 ### 1.2 Prerequisites
 
-- Docker and Docker Compose v2+
+- Docker (for image builds and testcontainers-based integration tests)
 - Python 3.11+ with pip
 - `kubectl` configured with cluster access
 - TLS certificates for Kafka mTLS (CA cert, client cert, client key)
@@ -124,35 +122,13 @@ python -m src.main
 # Health check: GET /api/v1/health
 ```
 
-### 4.2 Docker Compose (Local Stack)
-
-Starts the simulation, MQTT broker, local Kafka, ORCE, and Kafka UI:
-
-```bash
-docker compose up -d
-
-# Verify all services are healthy
-docker compose ps
-
-# View simulation logs
-docker compose logs -f simulation
-```
-
-| Service | URL |
-|---|---|
-| Simulation API | `http://localhost:8080` |
-| MQTT Broker | `localhost:1883` |
-| Kafka | `localhost:9092` |
-| ORCE (Node-RED) | `http://localhost:1880` |
-| Kafka UI | `http://localhost:8090` |
-
-### 4.3 Run Tests
+### 4.2 Run Tests
 
 ```bash
 # Unit tests
 pytest tests/unit/ -v
 
-# Integration tests (requires Docker services running)
+# Integration tests (requires Docker, via testcontainers)
 pytest tests/integration/ -v
 
 # BDD tests
@@ -164,25 +140,20 @@ pytest tests/ -v --cov=src --cov-report=term-missing
 
 ## 5. Cluster Deployment
 
-### 5.1 Start in Cluster Mode
+### 5.1 Cluster Mode
 
-Cluster mode routes all data through ORCE to the remote Kafka cluster (direct Kafka publishing from the simulation is disabled):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.cluster.yml up --build
-```
-
-The cluster override:
-- Sets `CONFIG_OVERLAY=cluster` (loads `config/cluster.yaml`)
+Cluster mode routes all data through ORCE to the remote Kafka cluster (direct Kafka publishing from the simulation is disabled). Set via Helm:
+- `compatibilityMode=orce` and the `cluster` config overlay
 - Enables ORCE with mTLS Kafka routing
 - Disables simulation's direct Kafka publisher
 - Sets speed factor to 60× (1 simulated minute per real second)
-- Mounts TLS certificates into the ORCE container
 - Uses `facis-simulation-cluster.json` flow
+
+See [ORCE Cluster Deployment Guide](orce-cluster-deployment.md) for the full procedure.
 
 ### 5.2 ORCE Kubernetes Deployment
 
-For deploying ORCE directly on the cluster (without Docker Compose), follow the dedicated [ORCE Cluster Deployment Guide](orce-cluster-deployment.md). That document covers the complete manual procedure including in-cluster registry provisioning, Kaniko image builds, ORCE customizations (rdkafka SSL patch, JSON Forms GUI Generator), simulation service deployment, and ORCE flow management via the admin API.
+Follow the dedicated [ORCE Cluster Deployment Guide](orce-cluster-deployment.md). That document covers the complete manual procedure including in-cluster registry provisioning, Kaniko image builds, ORCE customizations (rdkafka SSL patch, JSON Forms GUI Generator), simulation service deployment, and ORCE flow management via the admin API.
 
 Quick reference:
 
@@ -395,7 +366,8 @@ curl http://localhost:8080/api/v1/simulation/status
 
 ```bash
 # Simulation and ORCE logs
-docker compose logs -f simulation orce
+kubectl logs -n facis -l app.kubernetes.io/name=facis-simulation -f
+kubectl logs -n orce deploy/orce -f
 
 # Kafka consumer group status (from inside cluster)
 kubectl exec -n stackable <kafka-pod> -- \
@@ -421,7 +393,7 @@ kubectl exec -n stackable <kafka-pod> -- \
 
 ```bash
 # Stop simulation (data in Lakehouse persists)
-docker compose -f docker-compose.yml -f docker-compose.cluster.yml down
+helm uninstall facis-simulation -n facis
 
 # Full Lakehouse teardown (drops all schemas, tables, views)
 python scripts/setup_lakehouse.py --env-file .env.cluster --teardown

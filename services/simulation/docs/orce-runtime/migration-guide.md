@@ -52,22 +52,10 @@ If a reviewer flags SRS Test 22 as an acceptance gap, point to the TDR's
 Change Request acceptance criteria. The TDR is the source of truth for
 delivery rules.
 
-### Pre-existing compose references still in the tree
-
-The simulation service still contains compose-related references in legacy
-documentation that are *not* in scope for this migration:
-
-- `services/simulation/README.md` (updated in this branch)
-- `services/simulation/docs/guides/{setup,index}.md`
-- `services/simulation/docs/pipeline/mqtt-kafka-bronze-pipeline.md`
-- `services/simulation/docs/deployment/{deployment-operations,ops-runbook,infrastructure-prerequisites,orce-cluster-deployment}.md`
-- `services/simulation/docs/architecture/system-architecture.md` (§9 Docker Compose Topology)
-- `services/simulation/scripts/{generate_presentation,demo_e2e,setup_nifi_mqtt_to_kafka}.py`
-- `services/simulation/tests/integration/test_mqtt_{kafka_pipeline,publisher}.py` (docstrings; the tests themselves use `testcontainers`)
-
-These should be cleaned up in a dedicated `chore/tdr-compose-cleanup` PR
-rather than expanding this migration. They do not affect runtime behaviour
-or the TDR-compliant delivery surface.
+Compose references across the tree's documentation, scripts, and test
+docstrings have since been cleaned up to point at the Helm/kind local
+stack instead. Only the compliance banners noting the TDR §9.1.1 rule
+itself remain.
 
 ## Controlled break: numeric determinism
 

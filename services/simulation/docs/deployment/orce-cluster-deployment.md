@@ -22,7 +22,7 @@ This document describes the complete procedure for deploying ORCE (the XFSC Orch
 | ORCE flow import via admin API | S3 object storage provisioning |
 | Start/stop controls via ORCE dashboard | NiFi pipeline configuration |
 
-For platform infrastructure requirements, see [Infrastructure Prerequisites](infrastructure-prerequisites.md). For the standard deployment procedures (Docker Compose, Lakehouse setup, NiFi pipelines), see [Deployment & Operations Guide](deployment-operations.md).
+For platform infrastructure requirements, see [Infrastructure Prerequisites](infrastructure-prerequisites.md). For the standard deployment procedures (Helm, Lakehouse setup, NiFi pipelines), see [Deployment & Operations Guide](deployment-operations.md).
 
 ### 1.2 Prerequisites
 

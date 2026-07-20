@@ -64,12 +64,12 @@ logger = logging.getLogger("setup_nifi_mqtt_to_kafka")
 DEFAULT_KEYCLOAK_URL = "https://identity.facis.cloud/realms/facis"
 DEFAULT_NIFI_URL = "https://212.132.83.82:8443"
 
-# MQTT Broker — internal to Docker Compose / K8s cluster
+# MQTT Broker — internal to the K8s cluster
 MQTT_BROKER_HOST_LOCAL = "mqtt"
 MQTT_BROKER_HOST_CLUSTER = "facis-mqtt.stackable.svc.cluster.local"
 MQTT_BROKER_PORT = 1883
 
-# Kafka — internal to Docker Compose / K8s cluster
+# Kafka — internal to the K8s cluster
 KAFKA_BOOTSTRAP_LOCAL = "kafka:9092"
 KAFKA_BOOTSTRAP_CLUSTER = "kafka-broker-default-bootstrap.stackable.svc.cluster.local:9093"
 

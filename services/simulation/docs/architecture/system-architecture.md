@@ -4,11 +4,9 @@
 **Version:** 1.0
 **Date:** 07 March 2026
 
-> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** This document
-> retains a "Docker Compose Topology" section (§9) describing the historical
-> local-dev stack, kept as background for understanding the migration. The
-> simulation service no longer ships any `docker-compose*.yml`. Current
-> deployment uses Helm + Kubernetes; for migration context see
+> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** The simulation
+> service does not ship any `docker-compose*.yml`. Deployment uses Helm +
+> Kubernetes; for migration context see
 > [`../orce-runtime/migration-guide.md`](../orce-runtime/migration-guide.md).
 
 ---
@@ -59,8 +57,8 @@ The FACIS FAP IoT & AI Demonstrator implements a complete end-to-end data pipeli
 
 | Component | Technology | Version | Deployment |
 |---|---|---|---|
-| Simulation Service | Python 3.11, FastAPI, paho-mqtt, pymodbus, confluent-kafka | Custom | Docker Compose |
-| ORCE | Node-RED (ecofacis/xfsc-orce) with rdkafka + mTLS patch | 2.0.3 | Docker Compose / K8s |
+| Simulation Service | Python 3.11, FastAPI, paho-mqtt, pymodbus, confluent-kafka | Custom | Kubernetes |
+| ORCE | Node-RED (ecofacis/xfsc-orce) with rdkafka + mTLS patch | 2.0.3 | Kubernetes |
 | Kafka | Apache Kafka (Stackable operator) | Managed | Kubernetes |
 | NiFi | Apache NiFi (Stackable operator) | 2.6 | Kubernetes |
 | Trino | Trino with Iceberg connector (Stackable operator) | Managed | Kubernetes |
@@ -253,30 +251,6 @@ TLS certificates are provisioned by Stackable's `secret-operator`:
 - Service-specific certificates with headless service FQDNs in SANs
 - PKCS12 keystores and truststores for Java-based services (NiFi, Trino)
 - PEM certificates for Kafka external access
-
-## 9. Docker Compose Topology
-
-### 9.1 Local Development (`docker-compose.yml`)
-
-| Service | Image | Ports | Purpose |
-|---|---|---|---|
-| simulation | facis-simulation-service | 8080, 502 | Simulation service |
-| mqtt | eclipse-mosquitto | 1883, 9001 | MQTT broker |
-| kafka | confluentinc/cp-kafka:7.6.0 | 9092 | Local Kafka (KRaft) |
-| orce | ecofacis/xfsc-orce:2.0.3 | 1880 | Orchestration engine |
-| kafka-ui | provectuslabs/kafka-ui | 8090 | Kafka monitoring |
-
-### 9.2 Cluster Mode Override (`docker-compose.cluster.yml`)
-
-Overlays the local setup for remote cluster connectivity:
-- Simulation: `CONFIG_OVERLAY=cluster`, disables direct Kafka, enables ORCE
-- ORCE: Built from `./orce/` with rdkafka mTLS patch, mounts TLS certificates, uses cluster flow
-- Speed factor: 60× (1 simulated minute per real second)
-
-```bash
-# Start in cluster mode
-docker compose -f docker-compose.yml -f docker-compose.cluster.yml up --build
-```
 
 ---
 

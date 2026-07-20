@@ -9,7 +9,7 @@ This script validates the full data pipeline by:
 4. Validating message schemas, timestamps, and correlations
 
 Usage:
-    # Local (Docker Compose)
+    # Local (Helm/kind cluster)
     python scripts/demo_e2e.py
 
     # Remote cluster with TLS

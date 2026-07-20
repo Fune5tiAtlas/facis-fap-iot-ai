@@ -13,7 +13,8 @@ These tests verify:
 
 Requirements:
     pip install -e ".[dev]"
-    Docker Compose stack running: docker compose up -d mqtt kafka
+    MQTT + Kafka reachable (e.g. via the Helm/kind local stack — see
+    docs/guides/setup.md)
 
 Usage:
     pytest tests/integration/test_mqtt_kafka_pipeline.py -v
@@ -123,7 +124,7 @@ kafka_available = pytest.mark.skipif(
 
 requires_infrastructure = pytest.mark.skipif(
     not (_check_mqtt_available() and _check_kafka_available()),
-    reason="MQTT and/or Kafka not available (run: docker compose up -d mqtt kafka)",
+    reason="MQTT and/or Kafka not available (see docs/guides/setup.md for local Helm/kind stack)",
 )
 
 
@@ -380,7 +381,7 @@ class TestTopicMapping:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — require MQTT + Kafka (Docker Compose)
+# Integration tests — require MQTT + Kafka
 # ---------------------------------------------------------------------------
 
 
@@ -411,7 +412,7 @@ class TestEndToEndPipeline:
     End-to-end integration tests for the MQTT → Kafka Bronze pipeline.
 
     These tests require:
-    1. Docker Compose stack running (mqtt + kafka)
+    1. MQTT + Kafka reachable (mqtt + kafka)
     2. NiFi pipeline deployed (scripts/setup_nifi_mqtt_to_kafka.py)
 
     The tests publish MQTT messages and verify they arrive in the correct

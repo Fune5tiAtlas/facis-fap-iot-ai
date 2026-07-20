@@ -4,11 +4,9 @@
 **Version:** 1.0
 **Date:** 07 March 2026
 
-> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** Sections of
-> this guide that reference `docker compose` / `docker-compose.yml` document
-> the historical pre-2026-04-29 local stack, retained for background only.
-> The simulation service no longer ships any `docker-compose*.yml`. Use
-> Helm against a kind/minikube cluster for local dev — see the
+> **TDR §9.1.1 — Docker Compose is not a FACIS deliverable.** The simulation
+> service does not ship any `docker-compose*.yml`. Use Helm against a
+> kind/minikube cluster for local dev — see the
 > [`orce-runtime migration guide`](../orce-runtime/migration-guide.md) for
 > the supported workflow and the rationale for the move.
 
@@ -21,7 +19,6 @@
 | Python | 3.11 | `python3 --version` |
 | pip | 23.0 | `pip --version` |
 | Docker | 24.0 | `docker --version` |
-| Docker Compose | 2.20 | `docker compose version` |
 | Git | 2.40 | `git --version` |
 
 Optional (for cluster deployment):
@@ -128,34 +125,22 @@ docker build -t facis-simulation:latest .
 
 ### 4.2 Local Development Stack
 
-The `docker-compose.yml` starts the full local stack (simulation + Mosquitto + Kafka + ORCE + Kafka UI):
+Run the full local stack (simulation + Mosquitto + Kafka + ORCE) via Helm
+against a kind/minikube cluster — see the
+[`orce-runtime migration guide`](../orce-runtime/migration-guide.md) for
+the supported workflow:
 
 ```bash
-docker compose up --build
+helm install facis-simulation ../../services/simulation/helm/facis-simulation/ \
+  --namespace facis --create-namespace
 ```
-
-Services and ports:
-
-| Service | Port | URL |
-|---|---|---|
-| Simulation (REST) | 8080 | http://localhost:8080 |
-| Simulation (Modbus) | 502 | tcp://localhost:502 |
-| Mosquitto (MQTT) | 1883 | tcp://localhost:1883 |
-| Kafka | 9092 | tcp://localhost:9092 |
-| Kafka UI | 8090 | http://localhost:8090 |
-| ORCE (Node-RED) | 1880 | http://localhost:1880 |
 
 ### 4.3 Cluster Overlay
 
-For remote cluster deployment with mTLS Kafka:
-
-```bash
-# Ensure TLS certificates are in place
-ls certs/  # ca.crt, client.crt, client.key
-
-# Start with cluster overlay (ORCE publishes to remote Kafka via mTLS)
-docker compose -f docker-compose.yml -f docker-compose.cluster.yml up --build
-```
+For remote cluster deployment with mTLS Kafka, ensure TLS certificates are
+in place (`certs/ca.crt`, `certs/client.crt`, `certs/client.key`) and set
+`compatibilityMode=orce` in the Helm values — see
+[`deployment-operations.md`](../deployment/deployment-operations.md).
 
 ---
 
@@ -298,8 +283,6 @@ simulation-service/
 ├── certs/                         TLS certificates (not committed)
 ├── docs/                          Documentation tree
 ├── Dockerfile                     2-stage production image
-├── docker-compose.yml             Local development stack
-├── docker-compose.cluster.yml     Cluster deployment overlay
 ├── pyproject.toml                 Package metadata and tool config
 ├── LICENSE                        Apache 2.0
 ├── NOTICE.md                      Third-party notices
@@ -314,8 +297,6 @@ simulation-service/
 **`confluent-kafka` fails to install.** This package requires `librdkafka` system library. On macOS: `brew install librdkafka`. On Ubuntu: `apt install librdkafka-dev`. If you only need REST/MQTT/Modbus (no Kafka publishing), you can comment out `confluent-kafka` from `pyproject.toml` dependencies.
 
 **Port 502 requires root.** Modbus default port 502 is a privileged port. Either run as root (not recommended), change the port via `SIMULATOR_MODBUS__PORT=5020`, or use Docker (which maps ports automatically).
-
-**Docker compose "network not found".** Run `docker compose down` first to clean up stale networks, then `docker compose up --build`.
 
 **ORCE connection refused.** ORCE publishing is disabled by default (`SIMULATOR_ORCE__ENABLED=false`). Enable it via environment variable or config YAML if you need the Kafka routing middleware.
 
