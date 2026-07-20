@@ -103,6 +103,7 @@ test('restore creates schema and loads rows into GLOBAL maps', async () => {
 
     assert.deepEqual(norm(globalCtx.get('transfers')), { 'tp-1': txDoc1, 'tp-2': txDoc2 });
     assert.deepEqual(norm(globalCtx.get('negotiations')), { 'neg-1': negDoc1 });
+    assert.equal(globalCtx.get('stateReady'), true, 'restore marks state ready');
     // Non-empty tables → migration path skipped entirely.
     assert.equal(calls.some((c) => c.sql.startsWith('INSERT')), false, 'no migration INSERT when tables populated');
 });
@@ -176,7 +177,7 @@ test('one-time migration imports legacy JSON only when a table is empty', async 
 
 test('persist transfers snapshot replaces the table in one transaction', async () => {
     const calls = [];
-    const globalCtx = new Map([['transfers', {
+    const globalCtx = new Map([['stateReady', true], ['transfers', {
         'tp-1': { id: 'tp-1', state: 'COMPLETED' },
         'tp-2': { id: 'tp-2', state: 'STARTED' }
     }]]);
@@ -199,7 +200,7 @@ test('persist transfers snapshot replaces the table in one transaction', async (
 
 test('persist failure rolls back and node.errors without throwing out of the node', async () => {
     const calls = [];
-    const globalCtx = new Map([['transfers', { 'tp-1': { id: 'tp-1', state: 'STARTED' } }]]);
+    const globalCtx = new Map([['stateReady', true], ['transfers', { 'tp-1': { id: 'tp-1', state: 'STARTED' } }]]);
     const res = await runNode(STATE_FLOW, 'dsp-persist-transfers-fn', {
         env: ENV,
         msg: {},
@@ -244,4 +245,18 @@ test('no flow-scoped transfers store remains in any DSP flow (must be global)', 
         const hits = src.match(/flow\.(get|set)\('transfers'/g) || [];
         assert.equal(hits.length, 0, f + " still has flow-scoped 'transfers': " + JSON.stringify(hits));
     }
+});
+
+test('persist refuses to run before restore has completed (boot-window guard)', async () => {
+    const calls = [];
+    const globalCtx = new Map([['transfers', { 'tp-x': { id: 'tp-x', state: 'STARTED' } }]]); // no stateReady
+    const { warnings } = await runNode(STATE_FLOW, 'dsp-persist-transfers-fn', {
+        env: ENV,
+        msg: { payload: '' },
+        globalCtx,
+        libs: { pg: mockPg({}, calls) }
+    });
+    assert.equal(calls.length, 0, 'no SQL may run before stateReady');
+    assert.ok(warnings.some((w) => String(w).includes('restore has not completed')),
+        'skip is announced via node.warn');
 });
