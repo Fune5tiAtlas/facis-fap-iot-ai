@@ -386,8 +386,8 @@ helm upgrade facis-dsp-connector . -n orce \
 kubectl exec -n orce deploy/orce -- env | grep DSP_KAFKA_BOOTSTRAP
 kubectl exec -n orce deploy/orce -- ls /data/node_modules/node-rdkafka/lib/admin.js
 
-# 3. Put the mTLS PEMs where the E2E script expects them (from
-#    `Credentials and configs/credentials.txt`) and run it
+# 3. Put the mTLS PEMs where the E2E script expects them (extract from
+#    Secret/facis-kafka-certs or your credential store) and run it
 mkdir -p /tmp/facis-kafka-certs   # ca.crt, tls.crt, tls.key
 cd ../../orce/tests
 node e2e/dsp-kafka-transfer-e2e.js --env-file .env.cluster

@@ -122,9 +122,9 @@ The path is referenced by the `kafka-broker` config node in
 
 Note: Stackable's secret-operator issues short-lived client certs (~3
 months in the current case). When `tls.crt` approaches expiry, both the
-`Credentials and configs/credentials.txt` source AND the Secret here need
-refreshing. See `services/simulation/docs/orce-runtime/operations-runbook.md`
-for the rotation procedure.
+team credential store AND the Secret here need refreshing. See
+`services/simulation/docs/orce-runtime/operations-runbook.md` for the
+rotation procedure.
 
 ### `orce/kafka-broker-watcher-cronjob.yaml`
 
