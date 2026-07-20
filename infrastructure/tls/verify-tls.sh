@@ -26,13 +26,15 @@ echo
 NEG=$(curl -skv --max-time 12 "$URL" 2>&1 | grep -i "SSL connection using" | sed 's/^\* *//')
 echo "default negotiation : ${NEG:-<none>}"
 
-# Force TLS 1.2 as the maximum — a 2xx means 1.2 is still accepted (policy FAIL).
+# Force TLS 1.2 as the maximum. A refused handshake makes curl exit non-zero
+# and emit no http_code (000); ANY http_code (200/301/404/...) means the 1.2
+# handshake completed and the endpoint served over 1.2 — a policy failure.
 CODE_12=$(curl -sk --max-time 12 --tls-max 1.2 -o /dev/null -w "%{http_code}" "$URL" 2>/dev/null)
-echo "force TLS 1.2 max    : http=${CODE_12}  (000/non-2xx = refused, the intended result)"
+echo "force TLS 1.2 max    : http=${CODE_12}  (000 = handshake refused, the intended result)"
 
-# Force TLS 1.1 as the maximum — must be refused.
+# Force TLS 1.1 as the maximum — must be refused (000).
 CODE_11=$(curl -sk --max-time 12 --tls-max 1.1 -o /dev/null -w "%{http_code}" "$URL" 2>/dev/null)
-echo "force TLS 1.1 max    : http=${CODE_11}  (000/non-2xx = refused)"
+echo "force TLS 1.1 max    : http=${CODE_11}  (000 = handshake refused)"
 
 # A normal request (TLS 1.3) must still succeed.
 CODE_OK=$(curl -sk --max-time 12 -o /dev/null -w "%{http_code}" "$URL" 2>/dev/null)
@@ -41,7 +43,10 @@ echo "normal request (1.3): http=${CODE_OK}"
 echo
 PASS=1
 case "$NEG" in *TLSv1.3*) ;; *) echo "FAIL: default handshake did not negotiate TLS 1.3"; PASS=0;; esac
-[ "$CODE_12" = "200" ] && { echo "FAIL: TLS 1.2 is still accepted"; PASS=0; }
+# Any completed 1.2/1.1 handshake (non-000 code) is a failure — the endpoint
+# must not serve over those versions at all, regardless of the HTTP status.
+[ "$CODE_12" = "000" ] || { echo "FAIL: TLS 1.2 handshake completed (endpoint served over 1.2)"; PASS=0; }
+[ "$CODE_11" = "000" ] || { echo "FAIL: TLS 1.1 handshake completed (endpoint served over 1.1)"; PASS=0; }
 [ "$CODE_OK" = "200" ] || { echo "FAIL: TLS 1.3 request did not return 200"; PASS=0; }
 if [ "$PASS" = "1" ]; then
   echo "PASS: TLS 1.3 negotiates; TLS 1.2 and 1.1 are refused."

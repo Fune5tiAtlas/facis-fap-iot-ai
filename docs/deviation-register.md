@@ -14,7 +14,8 @@ reviewable in one place rather than being rediscovered from the code.
 - [D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)](#d-1--data-sink-realized-as-a-composite-tier-nf-4--q-03)
 - [D-2 — Single-replica ORCE runtime for DSP connector state (NF-5)](#d-2--single-replica-orce-runtime-for-dsp-connector-state-nf-5)
 - [D-3 — Encryption at rest without an external KMS (NF-8)](#d-3--encryption-at-rest-without-an-external-kms-nf-8)
-- [Pending candidate entries](#pending-candidate-entries)
+- [D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)](#d-4--kafka-streaming-transfers-without-in-band-credentials-or-per-agreement-acls-nf-3--fr-dp-002--q-15)
+- [D-5 — Dual DSP implementation surface: Python and ORCE (NF-5 / NF-7)](#d-5--dual-dsp-implementation-surface-python-and-orce-nf-5--nf-7)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
 
@@ -133,9 +134,70 @@ change, not a configuration adjustment on the current stack.
 
 **Approval status**: `Pending — RFC to client/PMO (object-store KMS capability)`.
 
-## Pending candidate entries
+## D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)
 
-The following candidate deviations are identified and awaiting a full entry; the
-detail is to be completed.
+**Requirement**: FR-DP-002 calls for the Kafka data plane to provision a
+per-agreement topic together with a scoped credential (for example a
+SCRAM-SHA-256 user) and an ACL restricting that credential to only its topic,
+so that a counterparty receives working connection credentials from the
+transfer's access object.
 
-- Dual DSP implementation, Python and ORCE (NF-5 / NF-7) — to be completed.
+**Implementation**: A kafka-streaming transfer creates a **real, per-transfer
+Kafka topic** on the broker via the connector's mTLS AdminClient
+(`facis-dsp-transfers.json`, node `dsp-tx-kafka-admin`) at transfer start, and
+deletes it on terminate; suspend keeps it (reversible). The transfer's access
+object carries the real bootstrap and topic but **no credentials** — `sasl`,
+`token`, and `url` are explicitly `null`, with an `accessNote` stating that
+mTLS trust to the topic is arranged out-of-band with the data space operator
+and that the API does not deliver connection credentials. No SCRAM user and no
+ACL are created.
+
+**Justification**: The FACIS Kafka cluster is **mTLS-only by deliberate,
+incident-informed decision** — SASL support is actively stripped from the
+build toolchain after a past outage caused by SASL being linked in — so
+SCRAM users and SASL ACLs are not buildable on this broker. Issuing a shared
+credential in the access object would be dishonest (it would hand out the
+connector's own identity) and was rejected in favour of an honest,
+credential-free access object plus a real topic. Fabricating a credential, the
+original state this finding recorded, is removed entirely.
+
+**Residual risk & mitigation**: A counterparty cannot connect from the access
+object alone; topic access requires an mTLS client certificate trusted by the
+cluster, arranged out-of-band. This is mitigated by the access object stating
+the requirement plainly rather than implying working credentials, and by the
+end-to-end test asserting the access object is credential-free. Closing the
+credential-delivery half requires a client/PMO decision among three options —
+enable SASL + an authorizer cluster-side, gain cert-issuance access for
+per-agreement mTLS certs, or accept a documented out-of-band mTLS trust model —
+which is a cluster-infrastructure decision gate, not connector code.
+
+**Approval status**: `Pending — RFC to client/PMO (Kafka credential-delivery model)`.
+
+## D-5 — Dual DSP implementation surface: Python and ORCE (NF-5 / NF-7)
+
+**Requirement**: A single, coherent DSP connector implementation whose behaviour
+and conformance are assessed against one code path.
+
+**Implementation**: The delivered, live DSP connector is the **ORCE-native**
+implementation — the Node-RED flows under `services/dsp-connector/orce/flows/`,
+deployed on the dedicated ORCE runtime. An earlier **Python** implementation
+(`services/dsp-connector/src/`) also exists in the tree; it is not the deployed
+runtime and its stub/in-memory behaviours are the ones the review recorded. All
+remediation (identity, ingest, Kafka provisioning, state persistence, typed
+errors) has been built on the ORCE path only.
+
+**Justification**: The TDR mandates the ORCE runtime for service execution, so
+the ORCE flows are the authoritative implementation; the Python service predates
+that mandate. Re-implementing every remediation twice, or deleting the Python
+tree mid-remediation, was not warranted for a demonstrator — the ORCE path is
+the one deployed, tested, and assessed.
+
+**Residual risk & mitigation**: The presence of two implementations invites
+confusion about which is authoritative, and TCK/error-shape conformance is only
+meaningful against the deployed ORCE path. Mitigated by documenting the ORCE
+flows as the deployed runtime throughout (`services/dsp-connector/orce/README.md`,
+`docs/architecture/fap-role-mapping.md`) and by scoping all conformance evidence
+to that path. Removing the superseded Python service is a defined cleanup
+follow-up, not a functional change.
+
+**Approval status**: `Pending — demonstrator scope`.

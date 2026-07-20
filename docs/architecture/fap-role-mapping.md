@@ -79,7 +79,9 @@ Isolation between flow sets rests on several properties:
   IAM flows.
 
 The topology is sized for a single-participant demonstrator: a single replica per
-ORCE instance, and file-based DSP state rather than an external state store.
+ORCE instance. DSP transfer and negotiation state is persisted in PostgreSQL
+(see the deviation register's D-2 entry); the single-replica runtime, not the
+state store, is what remains registered as a demonstrator-scope constraint.
 
 ## Related documents
 

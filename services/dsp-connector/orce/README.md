@@ -84,6 +84,33 @@ single pod, with a single writer. Running ORCE with more than one replica would
 require sharing that context across instances, which is out of scope for this
 demonstrator.
 
+**Durability drill (state survives a pod kill)** — reproduces the persistence
+evidence; also serves as the rolling-update / pod-loss demonstration. With
+`kubectl` pointed at the cluster running the dedicated ORCE instance:
+
+```bash
+# 1. Create a transfer (negotiate first; see the E2E scripts for the full
+#    negotiate→transfer sequence), note its id, and confirm the row is in Postgres:
+kubectl exec -n orce <postgres-pod> -- \
+  psql -U dsp -d dsp_state -tAc "SELECT id, state FROM dsp_transfers"
+
+# 2. Kill the ORCE pod:
+kubectl delete pod -n orce -l app.kubernetes.io/component=dsp-orce
+
+# 3. After it reschedules, the restore log line proves the state was reloaded:
+kubectl logs -n orce -l app.kubernetes.io/component=dsp-orce -c orce \
+  | grep "restored from PostgreSQL"
+#   -> "DSP state: N transfer(s), M negotiation(s) restored from PostgreSQL"
+
+# 4. The transfer is still served after the restart:
+curl -sk https://fap-iotai.facis.cloud/dsp/transfers/<transferId>
+#   -> the same transfer, same state
+```
+
+Note: a persist is fire-and-forget relative to the HTTP response, so a crash in
+the sub-second window between a 200 and its `COMMIT` can lose the last mutation;
+the durable record is the committed Postgres row.
+
 ## Endpoint paths
 
 To avoid colliding with the Simulation flow's `/api/v1/health` and `/metrics`

@@ -45,10 +45,17 @@ ConfigMap key above.
 ## Scope
 
 This controller fronts the `fap-iotai.facis.cloud` paths (`/orce`, `/ai`,
-`/dsp`, `/api/...`, `/iam`, `/.well-known/...`). The Superset subdomain
-(`fap-iotai-superset.facis.cloud`) is served by a **separate** Stackable load
-balancer and is not affected by this ConfigMap; internal service-to-service
+`/dsp`, `/api/...`, `/iam`, `/.well-known/...`). Internal service-to-service
 traffic (Trino, Kafka mTLS) does not traverse this controller.
+
+The Superset subdomain (`fap-iotai-superset.facis.cloud`) is served by a
+**separate** Stackable load balancer and is therefore **not** covered by this
+ConfigMap. To bring the whole public surface to a TLS 1.3 minimum, the
+Stackable ingress fronting Superset must be configured separately (its own
+`ssl-protocols`/min-version setting on that load balancer). Until that is done,
+`verify-tls.sh fap-iotai-superset.facis.cloud` will show TLS 1.2 still accepted
+on that host; the FACIS application ingress above is the endpoint under this
+policy.
 
 ## Evidence
 
