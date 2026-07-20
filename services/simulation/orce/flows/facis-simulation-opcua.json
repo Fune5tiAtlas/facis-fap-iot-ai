@@ -1,0 +1,149 @@
+[
+  {
+    "id": "tab-opcua",
+    "type": "tab",
+    "label": "FACIS Simulation — OPC UA Adapter",
+    "disabled": false,
+    "info": "FACIS Simulation — OPC UA Demo Server Adapter\n\nDemo fixture, not a production OPC UA server. Exposes the latest\nenergy-meter snapshot as 13 Double variables so the industrial\ningestion reference flows have a live OPC UA source to read from\n(services/industrial-ingestion-service/orce/).\n\nEndpoint: opc.tcp://<pod>:4840, SecurityPolicy None, anonymous,\nread-only. NodeIds: ns=1;s=FACIS.EnergyMeter.<metric> with the same\nmetric names as the Modbus register map (docs/api/modbus-reference.md).\n\nValues refresh every second from the `latest_meters` global context\nwritten by the Feeds tab, mirroring the Modbus adapter."
+  },
+  {
+    "id": "opcua-server-config",
+    "type": "OpcUa-Server",
+    "z": "tab-opcua",
+    "port": "4840",
+    "name": "FACIS OPC UA Demo Server",
+    "endpoint": "",
+    "usersFile": "",
+    "nodesetDir": "",
+    "autoAcceptUnknownCertificate": true,
+    "registerToDiscovery": false,
+    "constructDefaultAddressSpace": true,
+    "allowAnonymous": true,
+    "endpointNone": true,
+    "endpointSign": false,
+    "endpointSignEncrypt": false,
+    "endpointBasic128Rsa15": false,
+    "endpointBasic256": false,
+    "endpointBasic256Sha256": false,
+    "maxNodesPerBrowse": 0,
+    "maxNodesPerHistoryReadData": 0,
+    "maxNodesPerHistoryReadEvents": 0,
+    "maxNodesPerHistoryUpdateData": 0,
+    "maxNodesPerRead": 0,
+    "maxNodesPerWrite": 0,
+    "maxNodesPerMethodCall": 0,
+    "maxNodesPerRegisterNodes": 0,
+    "maxNodesPerNodeManagement": 0,
+    "maxMonitoredItemsPerCall": 0,
+    "maxNodesPerHistoryUpdateEvents": 0,
+    "maxNodesPerTranslateBrowsePathsToNodeIds": 0,
+    "maxConnectionsPerEndpoint": 20,
+    "maxMessageSize": 4096,
+    "maxBufferSize": 4096,
+    "maxSessions": 20,
+    "x": 720,
+    "y": 200,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "inject-opcua-init",
+    "type": "inject",
+    "z": "tab-opcua",
+    "name": "on start (register variables)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 180,
+    "y": 120,
+    "wires": [
+      [
+        "fn-opcua-init"
+      ]
+    ]
+  },
+  {
+    "id": "fn-opcua-init",
+    "type": "function",
+    "z": "tab-opcua",
+    "name": "register address space",
+    "func": "// Register the demo energy-meter address space (13 Double variables).\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\nconst msgs = METRICS.map((m) => ({\n    payload: { opcuaCommand: 'addVariable' },\n    topic: 'ns=1;s=FACIS.EnergyMeter.' + m + ';datatype=Double;value=0'\n}));\nnode.send([msgs]);\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 120,
+    "wires": [
+      [
+        "opcua-server-config"
+      ]
+    ]
+  },
+  {
+    "id": "inject-opcua-refresh",
+    "type": "inject",
+    "z": "tab-opcua",
+    "name": "every 1s refresh",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": false,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 160,
+    "y": 240,
+    "wires": [
+      [
+        "fn-opcua-writer"
+      ]
+    ]
+  },
+  {
+    "id": "fn-opcua-writer",
+    "type": "function",
+    "z": "tab-opcua",
+    "name": "build variable updates",
+    "func": "// Push the latest meter snapshot into the OPC UA server address space.\nconst meters = global.get('latest_meters') || [];\nif (meters.length === 0) {\n    return null;\n}\n\nconst meterIndex = Number(env.get('METER_INDEX') || 0);\nconst meter = meters[meterIndex] || meters[0];\nif (!meter || !meter.readings) {\n    return null;\n}\n\nconst r = meter.readings;\nconst phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];\nconst allPhasesPresent = phases.every((v) => typeof v === 'number' && Number.isFinite(v));\nconst totalActiveW = allPhasesPresent ? phases.reduce((a, b) => a + b, 0) : undefined;\n\nconst values = {\n    active_power_l1_w: r.active_power_l1_w,\n    active_power_l2_w: r.active_power_l2_w,\n    active_power_l3_w: r.active_power_l3_w,\n    active_power_total_w: totalActiveW,\n    voltage_l1_v: r.voltage_l1_v,\n    voltage_l2_v: r.voltage_l2_v,\n    voltage_l3_v: r.voltage_l3_v,\n    current_l1_a: r.current_l1_a,\n    current_l2_a: r.current_l2_a,\n    current_l3_a: r.current_l3_a,\n    power_factor: r.power_factor,\n    total_energy_kwh: r.total_energy_kwh,\n    frequency_hz: r.frequency_hz\n};\n\nconst updates = [];\nfor (const [name, value] of Object.entries(values)) {\n    if (typeof value !== 'number' || !Number.isFinite(value)) continue;\n    updates.push({\n        messageType: 'Variable',\n        namespace: 1,\n        variableName: 'FACIS.EnergyMeter.' + name,\n        variableValue: value,\n        sourceTimestamp: meter.timestamp\n    });\n}\nif (updates.length === 0) {\n    return null;\n}\n\nglobal.set('opcua_last_update_count', updates.length);\nglobal.set('opcua_last_update_meter', meter.meter_id);\n\nreturn { payload: updates };\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 240,
+    "wires": [
+      [
+        "opcua-server-config"
+      ]
+    ]
+  },
+  {
+    "id": "comment-opcua",
+    "type": "comment",
+    "z": "tab-opcua",
+    "name": "Demo fixture: read-only, SecurityPolicy None, anonymous",
+    "info": "Test fixture for the industrial ingestion reference flows.\nNot part of the product — mirrors the Modbus adapter fixture.\n",
+    "x": 320,
+    "y": 60,
+    "wires": []
+  }
+]
