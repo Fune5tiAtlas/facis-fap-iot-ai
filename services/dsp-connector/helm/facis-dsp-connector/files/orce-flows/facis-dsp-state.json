@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS DSP — State Bootstrap & Persistence",
     "disabled": false,
-    "info": "Owns the PVC-backed JSON state files for transfers and negotiations.\n\nStartup: read /data/dsp-state/transfers.json and /data/dsp-state/negotiations.json\ninto flow context. On read failure (first boot), initialise empty maps.\n\nMutations on other tabs: transfers use `flow.set('transfers', ...)` (per-tab context);\nnegotiations use `global.set('negotiations', ...)` (pod-wide context). Both then fire their\nrespective `dsp.persist.transfers` or `dsp.persist.negotiations` link with an empty trigger.\nThe receiver re-serialises the latest snapshot to disk (overwrite mode).\n\nSingle-replica only — file-based state is not multi-replica safe.\nWhen Postgres backing is added (out of scope), this tab is replaced wholesale."
+    "info": "Postgres-backed persistence for DSP transfers and negotiations.\n\nStartup: dsp-state-restore-fn creates the dsp_transfers / dsp_negotiations\ntables if absent, then loads every row into GLOBAL context as\nglobal.set('transfers') / global.set('negotiations'). Both stores are\nglobal-scoped, not flow-scoped: the link-producing flows and the health\nendpoint live on other tabs, and Node-RED flow-context is tab-local.\n\nOne-time migration: on first boot against an empty table, the legacy\nPVC JSON (/data/dsp-state/{transfers,negotiations}.json) is imported once,\nthen Postgres is the sole source of truth.\n\nPersistence: mutating flows fire the dsp.persist.transfers /\ndsp.persist.negotiations links with an empty trigger; the receiver re-reads\nthe authoritative in-memory map and replaces the table contents in one\ntransaction (snapshot semantics, same as the old file store).\n\nRetry: if Postgres is still booting when this instance starts, the restore\nraises on its catch node, which rate-limits (1/15s, drop) a retry until the\ndatabase accepts connections. Persist failures node.error but never crash."
   },
   {
     "id": "dsp-state-startup",
@@ -19,7 +19,7 @@
     "repeat": "",
     "crontab": "",
     "once": true,
-    "onceDelay": "0.5",
+    "onceDelay": "5",
     "topic": "",
     "payload": "",
     "payloadType": "str",
@@ -27,154 +27,74 @@
     "y": 80,
     "wires": [
       [
-        "dsp-read-transfers",
-        "dsp-read-negotiations"
+        "dsp-state-restore-fn"
       ]
     ]
   },
   {
-    "id": "dsp-read-transfers",
-    "type": "file in",
-    "z": "tab-dsp-state",
-    "name": "read transfers.json",
-    "filename": "/data/dsp-state/transfers.json",
-    "filenameType": "str",
-    "format": "utf8",
-    "chunk": false,
-    "sendError": true,
-    "encoding": "none",
-    "allProps": false,
-    "x": 360,
-    "y": 60,
-    "wires": [
-      [
-        "dsp-restore-transfers"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-restore-transfers",
+    "id": "dsp-state-restore-fn",
     "type": "function",
     "z": "tab-dsp-state",
-    "name": "restore transfers context",
-    "func": "let transfers = {};\ntry {\n    if (typeof msg.payload === 'string' && msg.payload.length > 0) {\n        transfers = JSON.parse(msg.payload);\n    } else if (msg.payload && typeof msg.payload === 'object') {\n        transfers = msg.payload;\n    }\n} catch (err) {\n    node.warn('Failed to parse transfers.json, starting empty: ' + err.message);\n    transfers = {};\n}\nflow.set('transfers', transfers);\nnode.log('DSP state: ' + Object.keys(transfers).length + ' transfer(s) restored');\nreturn null;\n",
+    "name": "restore state from PostgreSQL",
+    "func": "// Restore DSP state from PostgreSQL into GLOBAL context (both stores are\n// global-scoped: link-producing flows and the health endpoint live on other\n// tabs, and Node-RED flow-context is tab-local).\n// One-time migration: if a table is empty and the legacy JSON file exists,\n// import it, then continue serving from Postgres.\n// ponytail: one pg.Client per operation — state writes are <= a few per\n// minute; switch to a pooled client only if that ever changes.\nconst DDL = [\n    `CREATE TABLE IF NOT EXISTS dsp_transfers (\n        id TEXT PRIMARY KEY,\n        state TEXT NOT NULL DEFAULT '',\n        doc JSONB NOT NULL,\n        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`,\n    `CREATE TABLE IF NOT EXISTS dsp_negotiations (\n        id TEXT PRIMARY KEY,\n        state TEXT NOT NULL DEFAULT '',\n        doc JSONB NOT NULL,\n        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`\n];\n\nconst LEGACY = {\n    dsp_transfers: '/data/dsp-state/transfers.json',\n    dsp_negotiations: '/data/dsp-state/negotiations.json'\n};\n\n(async () => {\n    const client = new pg.Client({ connectionString: env.get('DSP_PG_URI') });\n    await client.connect();\n    try {\n        for (const ddl of DDL) await client.query(ddl);\n\n        const maps = {};\n        for (const [table, legacyPath] of Object.entries(LEGACY)) {\n            const count = await client.query(`SELECT count(*)::int AS n FROM ${table}`);\n            if (count.rows[0].n === 0) {\n                let legacy = {};\n                try { legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8')); } catch (e) { /* no legacy file */ }\n                for (const [id, doc] of Object.entries(legacy)) {\n                    await client.query(\n                        `INSERT INTO ${table} (id, state, doc) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,\n                        [id, (doc && doc.state) || '', doc]);\n                }\n                if (Object.keys(legacy).length) {\n                    node.log('DSP state: migrated ' + Object.keys(legacy).length + ' row(s) from ' + legacyPath);\n                }\n            }\n            const res = await client.query(`SELECT id, doc FROM ${table}`);\n            const map = {};\n            res.rows.forEach((r) => { map[r.id] = r.doc; });\n            maps[table] = map;\n        }\n        global.set('transfers', maps.dsp_transfers);\n        global.set('negotiations', maps.dsp_negotiations);\n        node.log('DSP state: ' + Object.keys(maps.dsp_transfers).length + ' transfer(s), '\n            + Object.keys(maps.dsp_negotiations).length + ' negotiation(s) restored from PostgreSQL');\n    } finally {\n        await client.end();\n    }\n})().catch((err) => {\n    // Surfaces on the tab's catch node, which rate-limits a retry — covers\n    // Postgres still booting when this instance starts.\n    node.error('DSP state restore failed: ' + (err && err.message ? err.message : err), msg);\n});\nreturn null;\n",
     "outputs": 0,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
-    "x": 620,
-    "y": 60,
+    "libs": [
+      {
+        "var": "pg",
+        "module": "pg"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 420,
+    "y": 80,
     "wires": []
   },
   {
-    "id": "dsp-read-transfers-catch",
+    "id": "dsp-state-restore-catch",
     "type": "catch",
     "z": "tab-dsp-state",
-    "name": "transfers.json missing",
+    "name": "restore failed (Postgres booting?)",
     "scope": [
-      "dsp-read-transfers"
+      "dsp-state-restore-fn"
     ],
     "uncaught": false,
-    "x": 360,
-    "y": 120,
+    "x": 180,
+    "y": 160,
     "wires": [
       [
-        "dsp-init-transfers"
+        "dsp-state-retry-limit"
       ]
     ]
   },
   {
-    "id": "dsp-init-transfers",
-    "type": "function",
+    "id": "dsp-state-retry-limit",
+    "type": "delay",
     "z": "tab-dsp-state",
-    "name": "init empty transfers",
-    "func": "// Initialise the in-memory map AND persist {} to disk on first run.\n// Forwarding through dsp-serialise-transfers writes the file using the\n// same path/format as later mutations — guarantees dsp-write-transfers\n// fires successfully at least once, which is what clears the editor's\n// per-node 'has an error' badge from any prior cold-start ENOENT.\nflow.set('transfers', {});\nnode.log('DSP state: no transfers.json yet — initialised empty map');\nreturn {};\n",
+    "name": "retry at most every 15s",
+    "pauseType": "rate",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "15",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": true,
+    "allowrate": false,
     "outputs": 1,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 620,
-    "y": 120,
+    "x": 470,
+    "y": 160,
     "wires": [
       [
-        "dsp-serialise-transfers"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-read-negotiations",
-    "type": "file in",
-    "z": "tab-dsp-state",
-    "name": "read negotiations.json",
-    "filename": "/data/dsp-state/negotiations.json",
-    "filenameType": "str",
-    "format": "utf8",
-    "chunk": false,
-    "sendError": true,
-    "encoding": "none",
-    "allProps": false,
-    "x": 360,
-    "y": 200,
-    "wires": [
-      [
-        "dsp-restore-negotiations"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-restore-negotiations",
-    "type": "function",
-    "z": "tab-dsp-state",
-    "name": "restore negotiations context",
-    "func": "let negotiations = {};\ntry {\n    if (typeof msg.payload === 'string' && msg.payload.length > 0) {\n        negotiations = JSON.parse(msg.payload);\n    } else if (msg.payload && typeof msg.payload === 'object') {\n        negotiations = msg.payload;\n    }\n} catch (err) {\n    node.warn('Failed to parse negotiations.json, starting empty: ' + err.message);\n    negotiations = {};\n}\nglobal.set('negotiations', negotiations);\nnode.log('DSP state: ' + Object.keys(negotiations).length + ' negotiation(s) restored');\nreturn null;\n",
-    "outputs": 0,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 640,
-    "y": 200,
-    "wires": []
-  },
-  {
-    "id": "dsp-read-negotiations-catch",
-    "type": "catch",
-    "z": "tab-dsp-state",
-    "name": "negotiations.json missing",
-    "scope": [
-      "dsp-read-negotiations"
-    ],
-    "uncaught": false,
-    "x": 370,
-    "y": 260,
-    "wires": [
-      [
-        "dsp-init-negotiations"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-init-negotiations",
-    "type": "function",
-    "z": "tab-dsp-state",
-    "name": "init empty negotiations",
-    "func": "// Initialise the in-memory map AND persist {} to disk on first run —\n// see dsp-init-transfers comment for rationale.\nglobal.set('negotiations', {});\nnode.log('DSP state: no negotiations.json yet — initialised empty map');\nreturn {};\n",
-    "outputs": 1,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 640,
-    "y": 260,
-    "wires": [
-      [
-        "dsp-serialise-negotiations"
+        "dsp-state-restore-fn"
       ]
     ]
   },
@@ -187,49 +107,33 @@
       "dsp-tx-link-out-persist"
     ],
     "x": 150,
-    "y": 380,
+    "y": 300,
     "wires": [
       [
-        "dsp-serialise-transfers"
+        "dsp-persist-transfers-fn"
       ]
     ]
   },
   {
-    "id": "dsp-serialise-transfers",
+    "id": "dsp-persist-transfers-fn",
     "type": "function",
     "z": "tab-dsp-state",
-    "name": "serialise transfers",
-    "func": "// Empty trigger pattern — receiver re-reads the latest snapshot.\n// Avoids stale-payload races when two mutations fire near-simultaneously.\nconst transfers = flow.get('transfers') || {};\nreturn {\n    payload: JSON.stringify(transfers, null, 2),\n    filename: '/data/dsp-state/transfers.json'\n};\n",
-    "outputs": 1,
+    "name": "persist transfers → PostgreSQL",
+    "func": "// Snapshot semantics preserved from the file-based store: re-read the\n// authoritative in-memory map and replace the table contents atomically.\n// ponytail: one pg.Client per operation — state writes are <= a few per\n// minute; switch to a pooled client only if that ever changes.\n(async () => {\n    const transfers = global.get('transfers') || {};\n    const client = new pg.Client({ connectionString: env.get('DSP_PG_URI') });\n    await client.connect();\n    try {\n        await client.query('BEGIN');\n        await client.query('DELETE FROM dsp_transfers');\n        for (const [id, doc] of Object.entries(transfers)) {\n            await client.query(\n                'INSERT INTO dsp_transfers (id, state, doc) VALUES ($1, $2, $3)',\n                [id, (doc && doc.state) || '', doc]);\n        }\n        await client.query('COMMIT');\n    } catch (err) {\n        try { await client.query('ROLLBACK'); } catch (e) { /* connection gone */ }\n        throw err;\n    } finally {\n        await client.end();\n    }\n})().catch((err) => {\n    node.error('DSP state persist (transfers) failed: ' + (err && err.message ? err.message : err), msg);\n});\nreturn null;\n",
+    "outputs": 0,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
-    "x": 400,
-    "y": 380,
-    "wires": [
-      [
-        "dsp-write-transfers"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-write-transfers",
-    "type": "file",
-    "z": "tab-dsp-state",
-    "name": "write transfers.json",
-    "filename": "filename",
-    "filenameType": "msg",
-    "appendNewline": false,
-    "createDir": true,
-    "overwriteFile": "true",
-    "encoding": "utf8",
-    "x": 640,
-    "y": 380,
-    "wires": [
-      []
-    ]
+    "libs": [
+      {
+        "var": "pg",
+        "module": "pg"
+      }
+    ],
+    "x": 430,
+    "y": 300,
+    "wires": []
   },
   {
     "id": "dsp-link-in-persist-negotiations",
@@ -240,48 +144,32 @@
       "dsp-neg-link-out-persist"
     ],
     "x": 150,
-    "y": 460,
+    "y": 380,
     "wires": [
       [
-        "dsp-serialise-negotiations"
+        "dsp-persist-negotiations-fn"
       ]
     ]
   },
   {
-    "id": "dsp-serialise-negotiations",
+    "id": "dsp-persist-negotiations-fn",
     "type": "function",
     "z": "tab-dsp-state",
-    "name": "serialise negotiations",
-    "func": "const negotiations = global.get('negotiations') || {};\nreturn {\n    payload: JSON.stringify(negotiations, null, 2),\n    filename: '/data/dsp-state/negotiations.json'\n};\n",
-    "outputs": 1,
+    "name": "persist negotiations → PostgreSQL",
+    "func": "// Snapshot semantics preserved from the file-based store: re-read the\n// authoritative in-memory map and replace the table contents atomically.\n// ponytail: one pg.Client per operation — state writes are <= a few per\n// minute; switch to a pooled client only if that ever changes.\n(async () => {\n    const negotiations = global.get('negotiations') || {};\n    const client = new pg.Client({ connectionString: env.get('DSP_PG_URI') });\n    await client.connect();\n    try {\n        await client.query('BEGIN');\n        await client.query('DELETE FROM dsp_negotiations');\n        for (const [id, doc] of Object.entries(negotiations)) {\n            await client.query(\n                'INSERT INTO dsp_negotiations (id, state, doc) VALUES ($1, $2, $3)',\n                [id, (doc && doc.state) || '', doc]);\n        }\n        await client.query('COMMIT');\n    } catch (err) {\n        try { await client.query('ROLLBACK'); } catch (e) { /* connection gone */ }\n        throw err;\n    } finally {\n        await client.end();\n    }\n})().catch((err) => {\n    node.error('DSP state persist (negotiations) failed: ' + (err && err.message ? err.message : err), msg);\n});\nreturn null;\n",
+    "outputs": 0,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
-    "x": 410,
-    "y": 460,
-    "wires": [
-      [
-        "dsp-write-negotiations"
-      ]
-    ]
-  },
-  {
-    "id": "dsp-write-negotiations",
-    "type": "file",
-    "z": "tab-dsp-state",
-    "name": "write negotiations.json",
-    "filename": "filename",
-    "filenameType": "msg",
-    "appendNewline": false,
-    "createDir": true,
-    "overwriteFile": "true",
-    "encoding": "utf8",
-    "x": 660,
-    "y": 460,
-    "wires": [
-      []
-    ]
+    "libs": [
+      {
+        "var": "pg",
+        "module": "pg"
+      }
+    ],
+    "x": 440,
+    "y": 380,
+    "wires": []
   }
 ]
