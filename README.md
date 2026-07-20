@@ -15,6 +15,7 @@ Part of the [FACIS](https://github.com/eclipse-xfsc/facis) project under [IPCEI-
 | AI Insight UI | `services/ai-insight-ui/` | Vue.js + UIBUILDER dashboard | v0.1.0 |
 | SFTP Ingestion | `services/sftp-ingestion-service/` | Polls SFTP directories, publishes to Kafka Bronze layer | v1.0.0 |
 | DSP Connector | `services/dsp-connector/` | Eclipse Dataspace Protocol connector (catalogue, transfers, identity) — ORCE-native | v1.0.0 |
+| Industrial Ingestion | `services/industrial-ingestion-service/` | OPC UA + Modbus TCP ingestion reference flows (ORCE-only) | v0.1.0 |
 
 ## Quick Start
 

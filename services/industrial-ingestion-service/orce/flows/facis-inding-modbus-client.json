@@ -1,0 +1,225 @@
+[
+  {
+    "id": "tab-inding-modbus-client",
+    "type": "tab",
+    "label": "Industrial Ingestion — Modbus TCP Client",
+    "disabled": false,
+    "info": "Industrial Ingestion — Modbus TCP Client (reference flow)\n\nReads 66 holding registers (FC3) from a Modbus TCP source, decodes the\nJanitza UMG 96RM float32 layout (big-endian ABCD, base address 19000),\nnormalizes into the industrial ingestion envelope and publishes to the\nKafka Bronze ingestion topic. Read-only: no write path to the source.\n\nEnvironment:\n  MODBUS_HOST / MODBUS_PORT   source address (required; config node uses\n                              ${MODBUS_HOST}/${MODBUS_PORT} substitution)\n  MODBUS_UNIT_ID              unit id (default 1)\n  MODBUS_POLL_MS              poll interval ms (default 5000)\n  MODBUS_BASE_ADDRESS         first register (default 19000)\n  MODBUS_DEVICE_ID            device id for envelope/key\n  MODBUS_INGEST_TOPIC         Kafka topic (default modbus.ingest.raw)\n  INDING_SITE_ID              site id for envelope\n  INDING_KAFKA_BROKERS        broker list (required)\n\nTo point at a real PLC instead of the simulation fixture, change the\nenv vars only — no flow edit needed. Errors (connect/read, decode,\npublish) go to the shared DLQ tab as typed envelopes; a failed cycle\nnever publishes a partial snapshot."
+  },
+  {
+    "id": "inding-kafka-broker-config",
+    "type": "kafka-broker",
+    "z": "",
+    "name": "FACIS Stackable Kafka Cluster (industrial ingestion)",
+    "broker": "${INDING_KAFKA_BROKERS}",
+    "clientid": "facis-orce-inding",
+    "securityProtocol": "ssl",
+    "sslCaLocation": "/etc/kafka-certs/ca.crt",
+    "sslCertLocation": "/etc/kafka-certs/tls.crt",
+    "sslKeyLocation": "/etc/kafka-certs/tls.key"
+  },
+  {
+    "id": "inding-modbus-client-config",
+    "type": "modbus-client",
+    "z": "",
+    "name": "Industrial Modbus Source",
+    "clienttype": "tcp",
+    "bufferCommands": true,
+    "stateLogEnabled": false,
+    "queueLogEnabled": false,
+    "failureLogEnabled": true,
+    "tcpHost": "${MODBUS_HOST}",
+    "tcpPort": "${MODBUS_PORT}",
+    "tcpType": "DEFAULT",
+    "serialPort": "/dev/ttyUSB",
+    "serialType": "RTU-BUFFERD",
+    "serialBaudrate": "9600",
+    "serialDatabits": "8",
+    "serialStopbits": "1",
+    "serialParity": "none",
+    "serialConnectionDelay": "100",
+    "serialAsciiResponseStartDelimiter": "0x3A",
+    "unit_id": 1,
+    "commandDelay": 1,
+    "clientTimeout": 2000,
+    "reconnectOnTimeout": true,
+    "reconnectTimeout": 2000,
+    "parallelUnitIdsAllowed": true,
+    "showErrors": true,
+    "showWarnings": true,
+    "showLogs": true
+  },
+  {
+    "id": "inding-modbus-start",
+    "type": "inject",
+    "z": "tab-inding-modbus-client",
+    "name": "on start",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 130,
+    "y": 120,
+    "wires": [
+      [
+        "inding-modbus-scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-scheduler",
+    "type": "function",
+    "z": "tab-inding-modbus-client",
+    "name": "poll scheduler",
+    "func": "// Self-rescheduling poll loop; interval from MODBUS_POLL_MS.\nconst pollMs = Math.max(500, Number(env.get('MODBUS_POLL_MS') || 5000));\nconst baseAddress = Number(env.get('MODBUS_BASE_ADDRESS') || 19000);\nconst unitId = Number(env.get('MODBUS_UNIT_ID') || 1);\n\nconst existing = context.get('poll_timer');\nif (existing) clearTimeout(existing);\n\nfunction firePoll() {\n    node.send({\n        cycle_started_at: new Date().toISOString(),\n        payload: { value: '', fc: 3, unitid: unitId, address: baseAddress, quantity: 66 }\n    });\n    context.set('poll_timer', setTimeout(firePoll, pollMs));\n}\nfirePoll();\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const t = context.get('poll_timer');\nif (t) clearTimeout(t);\n",
+    "libs": [],
+    "x": 320,
+    "y": 120,
+    "wires": [
+      [
+        "inding-modbus-getter"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-getter",
+    "type": "modbus-flex-getter",
+    "z": "tab-inding-modbus-client",
+    "name": "read holding registers (FC3)",
+    "showStatusActivities": false,
+    "showErrors": true,
+    "showWarnings": true,
+    "logIOActivities": false,
+    "server": "inding-modbus-client-config",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "keepMsgProperties": true,
+    "delayOnStart": false,
+    "startDelayTime": "",
+    "enableDeformedMessages": false,
+    "x": 560,
+    "y": 120,
+    "wires": [
+      [
+        "inding-modbus-decode"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "inding-modbus-decode",
+    "type": "function",
+    "z": "tab-inding-modbus-client",
+    "name": "decode registers + normalize",
+    "func": "// Decode Janitza-shaped float32 register pairs (big-endian ABCD).\nconst OFFSETS = {\n    active_power_l1_w: 0,\n    active_power_l2_w: 2,\n    active_power_l3_w: 4,\n    active_power_total_w: 6,\n    voltage_l1_v: 20,\n    voltage_l2_v: 22,\n    voltage_l3_v: 24,\n    current_l1_a: 40,\n    current_l2_a: 42,\n    current_l3_a: 44,\n    power_factor: 60,\n    total_energy_kwh: 62,\n    frequency_hz: 64\n};\n\nfunction registersToFloat32(high, low) {\n    const buf = Buffer.alloc(4);\n    buf.writeUInt16BE(high, 0);\n    buf.writeUInt16BE(low, 2);\n    return buf.readFloatBE(0);\n}\n\nconst raw = Array.isArray(msg.payload) ? msg.payload\n    : (msg.payload && Array.isArray(msg.payload.data)) ? msg.payload.data\n    : null;\n\nif (!raw || raw.length < 66) {\n    node.error('modbus-client: incomplete register block (' + (raw ? raw.length : 'none') + '/66)', msg);\n    return null;\n}\n\nconst readings = {};\nfor (const [metric, offset] of Object.entries(OFFSETS)) {\n    const value = registersToFloat32(raw[offset], raw[offset + 1]);\n    if (!Number.isFinite(value)) {\n        node.error('modbus-client: non-finite value for ' + metric, msg);\n        return null;\n    }\n    readings[metric] = value;\n}\n\nmsg.readings = readings;\nmsg.raw_registers = raw.slice(0, 66);\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 810,
+    "y": 120,
+    "wires": [
+      [
+        "inding-modbus-envelope"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-envelope",
+    "type": "function",
+    "z": "tab-inding-modbus-client",
+    "name": "build envelope + kafka msg",
+    "func": "// Build the industrial ingestion envelope and the Kafka producer msg.\nconst host = env.get('MODBUS_HOST') || '127.0.0.1';\nconst port = env.get('MODBUS_PORT') || '5020';\nconst unitId = env.get('MODBUS_UNIT_ID') || '1';\nconst siteId = env.get('INDING_SITE_ID') || 'site-001';\nconst deviceId = env.get('MODBUS_DEVICE_ID') || 'janitza-umg96rm-001';\nconst sourceEndpoint = 'modbus-tcp://' + host + ':' + port + '/' + unitId;\nconst sourceTimestamp = msg.cycle_started_at || new Date().toISOString();\n\nconst envelope = {\n    schema_version: '1.0',\n    event_id: sourceEndpoint + '|' + deviceId + '|' + sourceTimestamp,\n    ingest_timestamp: new Date().toISOString(),\n    source_protocol: 'modbus-tcp',\n    source_endpoint: sourceEndpoint,\n    site_id: siteId,\n    device_id: deviceId,\n    source_timestamp: sourceTimestamp,\n    quality: 'good',\n    readings: msg.readings,\n    raw_payload: JSON.stringify(msg.raw_registers)\n};\n\nconst m = global.get('metrics') || {};\nm.facis_inding_modbus_published_total = (m.facis_inding_modbus_published_total || 0) + 1;\nglobal.set('metrics', m);\n\nreturn {\n    topic: env.get('MODBUS_INGEST_TOPIC') || 'modbus.ingest.raw',\n    key: deviceId,\n    payload: JSON.stringify(envelope),\n    _inding_envelope: envelope,\n    _inding_device: deviceId,\n    _inding_protocol: 'modbus-tcp'\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1060,
+    "y": 120,
+    "wires": [
+      [
+        "inding-modbus-kafka-out"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-kafka-out",
+    "type": "rdkafka out",
+    "z": "tab-inding-modbus-client",
+    "name": "→ ${MODBUS_INGEST_TOPIC:-modbus.ingest.raw}",
+    "broker": "inding-kafka-broker-config",
+    "topic": "",
+    "x": 1310,
+    "y": 120,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "inding-modbus-catch",
+    "type": "catch",
+    "z": "tab-inding-modbus-client",
+    "name": "any error on this tab",
+    "scope": null,
+    "uncaught": false,
+    "x": 320,
+    "y": 240,
+    "wires": [
+      [
+        "inding-modbus-fail"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-fail",
+    "type": "function",
+    "z": "tab-inding-modbus-client",
+    "name": "format failure",
+    "func": "// Route any error on this tab to the shared DLQ with a typed envelope.\nlet errorType = 'read';\nif (msg && msg._inding_envelope) errorType = 'publish';\nelse if (msg && msg.readings) errorType = 'validate';\n\nreturn {\n    payload: {\n        error_type: errorType,\n        error_message: msg && msg.error ? (msg.error.message || String(msg.error)) : 'unknown error',\n        error_timestamp: new Date().toISOString(),\n        source_protocol: 'modbus-tcp',\n        device_id: (msg && msg._inding_device) || env.get('MODBUS_DEVICE_ID') || null,\n        original_envelope: (msg && msg._inding_envelope) || null\n    }\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 560,
+    "y": 240,
+    "wires": [
+      [
+        "inding-modbus-link-out-dlq"
+      ]
+    ]
+  },
+  {
+    "id": "inding-modbus-link-out-dlq",
+    "type": "link out",
+    "z": "tab-inding-modbus-client",
+    "name": "inding.dlq →",
+    "mode": "link",
+    "links": [
+      "inding-link-in-dlq"
+    ],
+    "x": 790,
+    "y": 240,
+    "wires": []
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "name": "facis-industrial-ingestion-orce-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Parity specs for the industrial ingestion ORCE flows (node:test, no Node-RED runtime).",
+  "scripts": {
+    "test": "node --test flows"
+  }
+}

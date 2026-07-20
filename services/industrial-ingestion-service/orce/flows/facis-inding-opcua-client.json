@@ -1,0 +1,204 @@
+[
+  {
+    "id": "tab-inding-opcua-client",
+    "type": "tab",
+    "label": "Industrial Ingestion — OPC UA Client",
+    "disabled": false,
+    "info": "Industrial Ingestion — OPC UA Client (reference flow)\n\nPolls 13 energy-meter variables from an OPC UA server (readmultiple),\nmaps OPC UA StatusCodes to the envelope quality field, normalizes into\nthe industrial ingestion envelope and publishes to the Kafka Bronze\ningestion topic. Read-only: no writes, no method calls.\n\nEnvironment:\n  OPCUA_ENDPOINT              opc.tcp URL (required; endpoint config node\n                              uses ${OPCUA_ENDPOINT} substitution)\n  OPCUA_POLL_MS               poll interval ms (default 5000)\n  OPCUA_NODE_PREFIX           NodeId prefix (default\n                              ns=1;s=FACIS.EnergyMeter.)\n  OPCUA_DEVICE_ID             device id for envelope/key\n  OPCUA_INGEST_TOPIC          Kafka topic (default opcua.ingest.raw)\n  INDING_SITE_ID              site id for envelope\n  INDING_KAFKA_BROKERS        broker list (required)\n\nQuality mapping: Bad status or non-numeric value fails the whole cycle\nto the DLQ (no partial snapshots); Uncertain marks the snapshot\nquality 'uncertain' and still publishes (range filtering stays in the\nSilver layer). Demo endpoint uses SecurityPolicy None + anonymous;\nSign/SignAndEncrypt are available on the endpoint config node for real\nsources."
+  },
+  {
+    "id": "inding-opcua-endpoint",
+    "type": "OpcUa-Endpoint",
+    "z": "",
+    "name": "Industrial OPC UA Source",
+    "endpoint": "${OPCUA_ENDPOINT}",
+    "secpol": "None",
+    "secmode": "None",
+    "none": true,
+    "login": false,
+    "usercert": false,
+    "usercertificate": "",
+    "userprivatekey": ""
+  },
+  {
+    "id": "inding-opcua-start",
+    "type": "inject",
+    "z": "tab-inding-opcua-client",
+    "name": "on start",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 130,
+    "y": 120,
+    "wires": [
+      [
+        "inding-opcua-scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-scheduler",
+    "type": "function",
+    "z": "tab-inding-opcua-client",
+    "name": "poll scheduler",
+    "func": "// Self-rescheduling poll loop; interval from OPCUA_POLL_MS.\n// Each cycle: clear the client's item list, queue the 13 NodeIds,\n// then trigger a readmultiple.\nconst pollMs = Math.max(500, Number(env.get('OPCUA_POLL_MS') || 5000));\nconst prefix = env.get('OPCUA_NODE_PREFIX') || 'ns=1;s=FACIS.EnergyMeter.';\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\n\nconst existing = context.get('poll_timer');\nif (existing) clearTimeout(existing);\n\nfunction firePoll() {\n    const cycleId = context.get('cycle_seq') || 0;\n    context.set('cycle_seq', cycleId + 1);\n    node.send({ topic: 'clearitems' });\n    for (const metric of METRICS) {\n        node.send({ topic: prefix + metric });\n    }\n    node.send({\n        topic: 'readmultiple',\n        cycle_id: 'c' + cycleId,\n        cycle_started_at: new Date().toISOString(),\n        expected_items: METRICS.length\n    });\n    context.set('poll_timer', setTimeout(firePoll, pollMs));\n}\nfirePoll();\nreturn null;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const t = context.get('poll_timer');\nif (t) clearTimeout(t);\n",
+    "libs": [],
+    "x": 320,
+    "y": 120,
+    "wires": [
+      [
+        "inding-opcua-client-node"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-client-node",
+    "type": "OpcUa-Client",
+    "z": "tab-inding-opcua-client",
+    "endpoint": "inding-opcua-endpoint",
+    "action": "readmultiple",
+    "deadbandtype": "a",
+    "deadbandvalue": 1,
+    "time": 10,
+    "timeUnit": "s",
+    "certificate": "n",
+    "localfile": "",
+    "localkeyfile": "",
+    "securitymode": "None",
+    "securitypolicy": "None",
+    "useTransport": false,
+    "maxChunkCount": 1,
+    "maxMessageSize": 8192,
+    "receiveBufferSize": 8192,
+    "sendBufferSize": 8192,
+    "setstatusandtime": false,
+    "keepsessionalive": true,
+    "name": "read energy meter",
+    "applicationName": "",
+    "applicationUri": "",
+    "x": 560,
+    "y": 120,
+    "wires": [
+      [
+        "inding-opcua-aggregate"
+      ],
+      [],
+      []
+    ]
+  },
+  {
+    "id": "inding-opcua-aggregate",
+    "type": "function",
+    "z": "tab-inding-opcua-client",
+    "name": "aggregate cycle + quality",
+    "func": "// Collect per-item readmultiple outputs into one snapshot per cycle.\n// Bad status or non-numeric value fails the whole cycle (no partials).\nif (!msg.cycle_id || msg.topic === 'readmultiple' || msg.topic === 'clearitems') {\n    return null;\n}\n\nconst prefix = env.get('OPCUA_NODE_PREFIX') || 'ns=1;s=FACIS.EnergyMeter.';\nconst expected = Number(msg.expected_items || 13);\n\nlet cycles = context.get('cycles') || {};\nconst failed = context.get('failed_cycles') || {};\nif (failed[msg.cycle_id]) return null;\n\nconst cycle = cycles[msg.cycle_id] || { items: [] };\nconst statusName = msg.statusCode && msg.statusCode.name ? String(msg.statusCode.name) : 'Good';\nconst metric = String(msg.topic).startsWith(prefix)\n    ? String(msg.topic).slice(prefix.length)\n    : String(msg.topic);\n\nfunction failCycle(reason) {\n    delete cycles[msg.cycle_id];\n    failed[msg.cycle_id] = true;\n    const keys = Object.keys(failed);\n    if (keys.length > 20) delete failed[keys[0]];\n    context.set('cycles', cycles);\n    context.set('failed_cycles', failed);\n    node.error('opcua-client: ' + reason, msg);\n}\n\nif (/^Bad/.test(statusName)) {\n    failCycle('Bad status for ' + metric + ' (' + statusName + ')');\n    return null;\n}\nconst value = Number(msg.payload);\nif (!Number.isFinite(value)) {\n    failCycle('non-numeric value for ' + metric);\n    return null;\n}\n\ncycle.items.push({\n    metric: metric,\n    value: value,\n    status: statusName,\n    source_timestamp: msg.sourceTimestamp || null\n});\n\nif (cycle.items.length < expected) {\n    cycles[msg.cycle_id] = cycle;\n    // Drop stale cycles so an interrupted read cannot leak memory.\n    const ids = Object.keys(cycles);\n    if (ids.length > 5) delete cycles[ids[0]];\n    context.set('cycles', cycles);\n    return null;\n}\n\ndelete cycles[msg.cycle_id];\ncontext.set('cycles', cycles);\n\nconst readings = {};\nlet quality = 'good';\nlet sourceTimestamp = null;\nfor (const item of cycle.items) {\n    readings[item.metric] = item.value;\n    if (/^Uncertain/.test(item.status)) quality = 'uncertain';\n    if (!sourceTimestamp && item.source_timestamp) sourceTimestamp = item.source_timestamp;\n}\n\nmsg.readings = readings;\nmsg.quality = quality;\nmsg.source_timestamp = sourceTimestamp\n    ? new Date(sourceTimestamp).toISOString()\n    : msg.cycle_started_at;\nmsg.raw_items = cycle.items;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 810,
+    "y": 120,
+    "wires": [
+      [
+        "inding-opcua-envelope"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-envelope",
+    "type": "function",
+    "z": "tab-inding-opcua-client",
+    "name": "build envelope + kafka msg",
+    "func": "// Build the industrial ingestion envelope and the Kafka producer msg.\nconst endpoint = env.get('OPCUA_ENDPOINT') || 'opc.tcp://127.0.0.1:4840';\nconst siteId = env.get('INDING_SITE_ID') || 'site-001';\nconst deviceId = env.get('OPCUA_DEVICE_ID') || 'janitza-umg96rm-001';\nconst sourceTimestamp = msg.source_timestamp || new Date().toISOString();\n\nconst envelope = {\n    schema_version: '1.0',\n    event_id: endpoint + '|' + deviceId + '|' + sourceTimestamp,\n    ingest_timestamp: new Date().toISOString(),\n    source_protocol: 'opc-ua',\n    source_endpoint: endpoint,\n    site_id: siteId,\n    device_id: deviceId,\n    source_timestamp: sourceTimestamp,\n    quality: msg.quality || 'good',\n    readings: msg.readings,\n    raw_payload: JSON.stringify(msg.raw_items)\n};\n\nconst m = global.get('metrics') || {};\nm.facis_inding_opcua_published_total = (m.facis_inding_opcua_published_total || 0) + 1;\nglobal.set('metrics', m);\n\nreturn {\n    topic: env.get('OPCUA_INGEST_TOPIC') || 'opcua.ingest.raw',\n    key: deviceId,\n    payload: JSON.stringify(envelope),\n    _inding_envelope: envelope,\n    _inding_device: deviceId,\n    _inding_protocol: 'opc-ua'\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1060,
+    "y": 120,
+    "wires": [
+      [
+        "inding-opcua-kafka-out"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-kafka-out",
+    "type": "rdkafka out",
+    "z": "tab-inding-opcua-client",
+    "name": "→ ${OPCUA_INGEST_TOPIC:-opcua.ingest.raw}",
+    "broker": "inding-kafka-broker-config",
+    "topic": "",
+    "x": 1310,
+    "y": 120,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "inding-opcua-catch",
+    "type": "catch",
+    "z": "tab-inding-opcua-client",
+    "name": "any error on this tab",
+    "scope": null,
+    "uncaught": false,
+    "x": 320,
+    "y": 240,
+    "wires": [
+      [
+        "inding-opcua-fail"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-fail",
+    "type": "function",
+    "z": "tab-inding-opcua-client",
+    "name": "format failure",
+    "func": "// Route any error on this tab to the shared DLQ with a typed envelope.\nlet errorType = 'read';\nif (msg && msg._inding_envelope) errorType = 'publish';\nelse if (msg && msg.readings) errorType = 'validate';\n\nreturn {\n    payload: {\n        error_type: errorType,\n        error_message: msg && msg.error ? (msg.error.message || String(msg.error)) : 'unknown error',\n        error_timestamp: new Date().toISOString(),\n        source_protocol: 'opc-ua',\n        device_id: (msg && msg._inding_device) || env.get('OPCUA_DEVICE_ID') || null,\n        original_envelope: (msg && msg._inding_envelope) || null\n    }\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 560,
+    "y": 240,
+    "wires": [
+      [
+        "inding-opcua-link-out-dlq"
+      ]
+    ]
+  },
+  {
+    "id": "inding-opcua-link-out-dlq",
+    "type": "link out",
+    "z": "tab-inding-opcua-client",
+    "name": "inding.dlq →",
+    "mode": "link",
+    "links": [
+      "inding-link-in-dlq"
+    ],
+    "x": 790,
+    "y": 240,
+    "wires": []
+  }
+]

@@ -1,0 +1,105 @@
+[
+  {
+    "id": "tab-inding-observability",
+    "type": "tab",
+    "label": "Industrial Ingestion — Observability",
+    "disabled": false,
+    "info": "Health endpoint (namespaced to avoid colliding with other flows on\nthe shared ORCE pod) plus a catch-all for this tab.\n\nGET /api/v1/industrial/health -> publish counters + DLQ totals."
+  },
+  {
+    "id": "inding-http-health",
+    "type": "http in",
+    "z": "tab-inding-observability",
+    "name": "GET /api/v1/industrial/health",
+    "url": "/api/v1/industrial/health",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 100,
+    "wires": [
+      [
+        "inding-health-fn"
+      ]
+    ]
+  },
+  {
+    "id": "inding-health-fn",
+    "type": "function",
+    "z": "tab-inding-observability",
+    "name": "health payload",
+    "func": "const m = global.get('metrics') || {};\nmsg.statusCode = 200;\nmsg.payload = {\n    status: 'ok',\n    service: 'industrial-ingestion',\n    modbus_published_total: m.facis_inding_modbus_published_total || 0,\n    opcua_published_total: m.facis_inding_opcua_published_total || 0,\n    dlq_total: m.facis_inding_dlq_total || {},\n    timestamp: new Date().toISOString()\n};\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 100,
+    "wires": [
+      [
+        "inding-health-res"
+      ]
+    ]
+  },
+  {
+    "id": "inding-health-res",
+    "type": "http response",
+    "z": "tab-inding-observability",
+    "name": "200",
+    "statusCode": "",
+    "headers": {},
+    "x": 650,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "inding-obs-catch",
+    "type": "catch",
+    "z": "tab-inding-observability",
+    "name": "any error on this tab",
+    "scope": null,
+    "uncaught": false,
+    "x": 200,
+    "y": 200,
+    "wires": [
+      [
+        "inding-obs-fail"
+      ]
+    ]
+  },
+  {
+    "id": "inding-obs-fail",
+    "type": "function",
+    "z": "tab-inding-observability",
+    "name": "format failure",
+    "func": "return {\n    payload: {\n        error_type: 'uncaught',\n        error_message: msg && msg.error ? (msg.error.message || String(msg.error)) : 'unknown error',\n        error_timestamp: new Date().toISOString(),\n        source_protocol: null,\n        device_id: null,\n        original_envelope: null\n    }\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "inding-obs-link-out-dlq"
+      ]
+    ]
+  },
+  {
+    "id": "inding-obs-link-out-dlq",
+    "type": "link out",
+    "z": "tab-inding-observability",
+    "name": "inding.dlq →",
+    "mode": "link",
+    "links": [
+      "inding-link-in-dlq"
+    ],
+    "x": 650,
+    "y": 200,
+    "wires": []
+  }
+]

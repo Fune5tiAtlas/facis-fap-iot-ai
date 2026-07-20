@@ -1,0 +1,106 @@
+[
+  {
+    "id": "tab-inding-dlq",
+    "type": "tab",
+    "label": "Industrial Ingestion — DLQ",
+    "disabled": false,
+    "info": "Industrial Ingestion — DLQ\n\nDead-letter publisher for read, validate, publish and uncaught failures\nfrom the Modbus and OPC UA client tabs.\n\nDLQ envelope shape:\n  {\n    error_type:       'read'|'validate'|'publish'|'uncaught',\n    error_message:    string,\n    error_timestamp:  ISO 8601,\n    source_protocol:  'modbus-tcp'|'opc-ua'|null,\n    device_id:        string|null,\n    original_envelope: <industrial ingestion envelope>|null\n  }\n\nThe DLQ producer publishes to the same Kafka cluster as the main path;\nits own publish failures are logged to stderr and dropped (non-recursive\ncatch), mirroring the SFTP ingestion DLQ."
+  },
+  {
+    "id": "inding-dlq-broker-config",
+    "type": "kafka-broker",
+    "z": "",
+    "name": "FACIS Stackable Kafka Cluster (industrial ingestion DLQ)",
+    "broker": "${INDING_KAFKA_BROKERS}",
+    "clientid": "facis-orce-inding-dlq",
+    "securityProtocol": "ssl",
+    "sslCaLocation": "/etc/kafka-certs/ca.crt",
+    "sslCertLocation": "/etc/kafka-certs/tls.crt",
+    "sslKeyLocation": "/etc/kafka-certs/tls.key"
+  },
+  {
+    "id": "inding-link-in-dlq",
+    "type": "link in",
+    "z": "tab-inding-dlq",
+    "name": "← inding.dlq",
+    "links": [
+      "inding-modbus-link-out-dlq",
+      "inding-opcua-link-out-dlq",
+      "inding-obs-link-out-dlq"
+    ],
+    "x": 130,
+    "y": 100,
+    "wires": [
+      [
+        "inding-dlq-format"
+      ]
+    ]
+  },
+  {
+    "id": "inding-dlq-format",
+    "type": "function",
+    "z": "tab-inding-dlq",
+    "name": "format DLQ envelope + metric",
+    "func": "// Normalise incoming failure payloads into the DLQ envelope.\nlet src = msg.payload;\nif (src && typeof src === 'object' && src.payload && src.payload.error_type) {\n    src = src.payload;\n}\nif (!src || typeof src !== 'object') {\n    src = { error_type: 'uncaught', error_message: String(msg.payload || msg.error || 'unknown') };\n}\nconst dlq = {\n    error_type: src.error_type || 'uncaught',\n    error_message: src.error_message || 'unknown',\n    error_timestamp: src.error_timestamp || new Date().toISOString(),\n    source_protocol: src.source_protocol || null,\n    device_id: src.device_id || null,\n    original_envelope: src.original_envelope || null\n};\n\nconst m = global.get('metrics') || {};\nm.facis_inding_dlq_total = m.facis_inding_dlq_total || {};\nm.facis_inding_dlq_total[dlq.error_type] = (m.facis_inding_dlq_total[dlq.error_type] || 0) + 1;\nglobal.set('metrics', m);\n\nreturn {\n    topic: env.get('INDING_DLQ_TOPIC') || 'industrial.ingest.dlq',\n    key: dlq.device_id || 'unknown',\n    payload: JSON.stringify(dlq)\n};\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 100,
+    "wires": [
+      [
+        "inding-dlq-out"
+      ]
+    ]
+  },
+  {
+    "id": "inding-dlq-out",
+    "type": "rdkafka out",
+    "z": "tab-inding-dlq",
+    "name": "→ ${INDING_DLQ_TOPIC:-industrial.ingest.dlq}",
+    "broker": "inding-dlq-broker-config",
+    "topic": "",
+    "x": 680,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "inding-dlq-catch",
+    "type": "catch",
+    "z": "tab-inding-dlq",
+    "name": "DLQ publish failed (do not recurse)",
+    "scope": [
+      "inding-dlq-out"
+    ],
+    "uncaught": false,
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "inding-dlq-debug"
+      ]
+    ]
+  },
+  {
+    "id": "inding-dlq-debug",
+    "type": "debug",
+    "z": "tab-inding-dlq",
+    "name": "DLQ failure (stderr)",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 720,
+    "y": 200,
+    "wires": []
+  }
+]
