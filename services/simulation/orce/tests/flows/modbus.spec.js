@@ -44,8 +44,16 @@ const REGISTERS = {
     frequency_hz: 19064,
 };
 
-function buildWrites(meter) {
-    if (!meter || !meter.readings) return [];
+// Mirrors fn-modbus-writer: ONE contiguous byte-array block write.
+// The server node's input path is byte-addressed at address*8; TCP reads
+// serve register R from byte R*2 — so the block must be delivered as a
+// single copy at (BASE_REGISTER*2)/8 to land at the Janitza addresses.
+const BASE_REGISTER = 19000;
+const BLOCK_REGISTERS = 66;
+const WRITE_ADDRESS = (BASE_REGISTER * 2) / 8;
+
+function buildBlockWrite(meter) {
+    if (!meter || !meter.readings) return null;
     const r = meter.readings;
     const phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];
     const allPhasesPresent = phases.every((v) => typeof v === 'number' && !Number.isNaN(v));
@@ -65,14 +73,21 @@ function buildWrites(meter) {
         [REGISTERS.total_energy_kwh, r.total_energy_kwh],
         [REGISTERS.frequency_hz, r.frequency_hz],
     ];
-    const writes = [];
+    const block = Buffer.alloc(BLOCK_REGISTERS * 2);
+    let written = 0;
     for (const [addr, value] of map) {
         if (typeof value !== 'number' || Number.isNaN(value)) continue;
-        const [high, low] = float32ToRegisters(value);
-        writes.push({ payload: { value: high, register: 'holding', address: addr } });
-        writes.push({ payload: { value: low, register: 'holding', address: addr + 1 } });
+        block.writeFloatBE(value, (addr - BASE_REGISTER) * 2);
+        written++;
     }
-    return writes;
+    if (written === 0) return null;
+    return { payload: { value: Array.from(block), register: 'holding', address: WRITE_ADDRESS, disableMsgOutput: 1 } };
+}
+
+function blockFloatAt(write, registerAddr) {
+    const off = (registerAddr - BASE_REGISTER) * 2;
+    const buf = Buffer.from(write.payload.value);
+    return buf.readFloatBE(off);
 }
 
 const SAMPLE_METER = {
@@ -93,59 +108,51 @@ const SAMPLE_METER = {
     },
 };
 
-test('modbus: 13 register pairs (26 writes) per meter', () => {
-    const writes = buildWrites(SAMPLE_METER);
-    assert.equal(writes.length, 26);
+test('modbus: one contiguous 66-register (132-byte) block write per meter', () => {
+    const w = buildBlockWrite(SAMPLE_METER);
+    assert.ok(w);
+    assert.equal(w.payload.register, 'holding');
+    assert.equal(w.payload.value.length, BLOCK_REGISTERS * 2);
+    for (const b of w.payload.value) {
+        assert.ok(Number.isInteger(b) && b >= 0 && b <= 0xff);
+    }
 });
 
-test('modbus: each write targets the holding buffer with a 16-bit value', () => {
-    const writes = buildWrites(SAMPLE_METER);
-    for (const w of writes) {
-        // modbus-server input contract: { value, register: 'holding', address }
-        assert.equal(w.payload.register, 'holding');
-        assert.ok(Number.isInteger(w.payload.address));
-        assert.ok(w.payload.value >= 0 && w.payload.value <= 0xffff);
-    }
+test('modbus: write address maps byte offset 19000*2 through the *8 write factor', () => {
+    // Read side serves register R from byte R*2; write side lands at address*8.
+    assert.equal(WRITE_ADDRESS, 4750);
+    assert.equal(WRITE_ADDRESS * 8, BASE_REGISTER * 2);
+    assert.ok(Number.isInteger(WRITE_ADDRESS), 'BASE_REGISTER must be divisible by 4');
 });
 
 test('modbus: round-trip preserves float32 values within precision', () => {
-    const writes = buildWrites(SAMPLE_METER);
-    function pairFor(addr) {
-        const high = writes.find((w) => w.payload.address === addr).payload.value;
-        const low = writes.find((w) => w.payload.address === addr + 1).payload.value;
-        return registersToFloat32(high, low);
-    }
+    const w = buildBlockWrite(SAMPLE_METER);
     const f32 = (v) => Math.fround(v);
-    assert.ok(Math.abs(pairFor(19000) - f32(SAMPLE_METER.readings.active_power_l1_w)) < 1e-3);
-    assert.ok(Math.abs(pairFor(19020) - f32(SAMPLE_METER.readings.voltage_l1_v)) < 1e-3);
-    assert.ok(Math.abs(pairFor(19062) - f32(SAMPLE_METER.readings.total_energy_kwh)) < 1e-2);
-    assert.ok(Math.abs(pairFor(19064) - f32(SAMPLE_METER.readings.frequency_hz)) < 1e-3);
+    assert.ok(Math.abs(blockFloatAt(w, 19000) - f32(SAMPLE_METER.readings.active_power_l1_w)) < 1e-3);
+    assert.ok(Math.abs(blockFloatAt(w, 19020) - f32(SAMPLE_METER.readings.voltage_l1_v)) < 1e-3);
+    assert.ok(Math.abs(blockFloatAt(w, 19062) - f32(SAMPLE_METER.readings.total_energy_kwh)) < 1e-2);
+    assert.ok(Math.abs(blockFloatAt(w, 19064) - f32(SAMPLE_METER.readings.frequency_hz)) < 1e-3);
 });
 
 test('modbus: total active power = L1 + L2 + L3', () => {
-    const writes = buildWrites(SAMPLE_METER);
-    const high = writes.find((w) => w.payload.address === 19006).payload.value;
-    const low = writes.find((w) => w.payload.address === 19007).payload.value;
-    const total = registersToFloat32(high, low);
+    const w = buildBlockWrite(SAMPLE_METER);
     const expected = SAMPLE_METER.readings.active_power_l1_w + SAMPLE_METER.readings.active_power_l2_w + SAMPLE_METER.readings.active_power_l3_w;
-    assert.ok(Math.abs(total - expected) < 1e-1);
+    assert.ok(Math.abs(blockFloatAt(w, 19006) - expected) < 1e-1);
 });
 
-test('modbus: address layout matches register_map.py', () => {
-    const writes = buildWrites(SAMPLE_METER);
-    const used = Array.from(new Set(writes.map((w) => w.payload.address))).sort((a, b) => a - b);
-    // 13 floats × 2 registers = 26 unique addresses
-    assert.equal(used.length, 26);
-    // Spot-check spec addresses
-    [19000, 19006, 19020, 19024, 19040, 19044, 19060, 19062, 19064].forEach((addr) => {
-        assert.ok(used.includes(addr), `expected register ${addr}`);
-    });
+test('modbus: unmapped gap registers stay zero', () => {
+    const w = buildBlockWrite(SAMPLE_METER);
+    const buf = Buffer.from(w.payload.value);
+    // 19008..19019 carry no fields in the Janitza layout
+    for (let reg = 19008; reg < 19020; reg++) {
+        assert.equal(buf.readUInt16BE((reg - BASE_REGISTER) * 2), 0, `register ${reg}`);
+    }
 });
 
-test('modbus: missing meter returns no writes', () => {
-    assert.deepEqual(buildWrites(null), []);
-    assert.deepEqual(buildWrites({}), []);
-    assert.deepEqual(buildWrites({ readings: {} }), []);
+test('modbus: missing meter produces no write', () => {
+    assert.equal(buildBlockWrite(null), null);
+    assert.equal(buildBlockWrite({}), null);
+    assert.equal(buildBlockWrite({ readings: {} }), null);
 });
 
 test('modbus flow: writer reads latest_meters from global context', () => {
@@ -164,8 +171,9 @@ test('modbus flow: no unwired link-in nodes', () => {
     assert.deepEqual(dead, []);
 });
 
-test('modbus flow: writer emits the modbus-server input contract', () => {
+test('modbus flow: writer emits one block write at the derived address', () => {
     const writer = readFlow().find((n) => n.id === 'fn-modbus-writer');
-    assert.match(writer.func, /register: 'holding', address: addr/);
+    assert.match(writer.func, /register: 'holding', address: WRITE_ADDRESS/);
+    assert.match(writer.func, /Array\.from\(block\)/);
     assert.doesNotMatch(writer.func, /fc: 'FC6'/);
 });

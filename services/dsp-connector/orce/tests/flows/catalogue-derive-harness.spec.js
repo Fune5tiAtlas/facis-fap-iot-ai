@@ -88,6 +88,43 @@ test('derives catalogue from live tables merged with overlay', async () => {
     }
 });
 
+test('bronze overlay entries validate against live bronze tables; bronze is never auto-derived', async () => {
+    const server = http.createServer((req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+            columns: [{ name: 'table_schema' }, { name: 'table_name' }],
+            data: [
+                ['gold', 'net_grid_hourly'],
+                ['bronze', 'modbus_ingest_raw'],
+                ['bronze', 'some_uncurated_landing_table']
+            ]
+        }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const flowCtx = new Map();
+        await runNode(CAT_FLOW, 'dsp-cat-derive-fn', {
+            env: baseEnv({ DSP_TRINO_URL: 'http://127.0.0.1:' + server.address().port }),
+            msg: {},
+            flowCtx
+        });
+        const merged = flowCtx.get('catalogue');
+        // Curated bronze overlay entry with a live bronze table: kept.
+        const modbus = merged.find((d) => d.id === 'dataset:facis:modbus-ingest-raw');
+        assert.ok(modbus, 'curated bronze entry kept when its table is live');
+        assert.equal(modbus.metadata.schema, 'bronze');
+        // Curated bronze entry whose table is NOT live: dropped.
+        assert.equal(merged.some((d) => d.id === 'dataset:facis:opcua-ingest-raw'), false);
+        // Live bronze table without an overlay entry: NOT auto-derived.
+        assert.equal(merged.some((d) => d.metadata.table === 'some_uncurated_landing_table'), false);
+        // Gold auto-derivation unaffected (net_grid_hourly claimed by overlay).
+        assert.equal(merged.length, 2, 'net-grid overlay + modbus bronze overlay only');
+        assert.equal(flowCtx.get('catalogueSource'), 'lakehouse');
+    } finally {
+        server.close();
+    }
+});
+
 test('keeps existing catalogue on Trino failure', async () => {
     const sentinel = [{ id: 'sentinel:kept' }];
     const flowCtx = new Map([['catalogue', sentinel]]);

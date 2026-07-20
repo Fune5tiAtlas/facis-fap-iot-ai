@@ -77,6 +77,8 @@ TOPIC_TABLE_MAP = {
     "sim.smart_city.event": "city_event",
     "sim.smart_city.weather": "city_weather",
     "dsp.ingest.raw": "dsp_ingest",
+    "modbus.ingest.raw": "modbus_ingest_raw",
+    "opcua.ingest.raw": "opcua_ingest_raw",
 }
 
 # ---------------------------------------------------------------------------

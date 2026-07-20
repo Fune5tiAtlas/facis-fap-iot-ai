@@ -135,5 +135,49 @@
         }
       }
     ]
+  },
+  {
+    "id": "dataset:facis:modbus-ingest-raw",
+    "metadata": {
+      "title": "Industrial Ingestion — Modbus TCP (Bronze)",
+      "description": "Normalized energy-meter snapshots ingested from a Modbus TCP source via the ORCE industrial ingestion reference flow",
+      "assetType": "iot.timeseries",
+      "format": "kafka/json",
+      "schema": "bronze",
+      "topic": "modbus.ingest.raw",
+      "table": "modbus_ingest_raw"
+    },
+    "offers": [
+      {
+        "id": "offer:facis:modbus-ingest-raw:read",
+        "policySummary": {
+          "purpose": "analytics",
+          "rate_limit": "10 req/min",
+          "ttl": "PT1H"
+        }
+      }
+    ]
+  },
+  {
+    "id": "dataset:facis:opcua-ingest-raw",
+    "metadata": {
+      "title": "Industrial Ingestion — OPC UA (Bronze)",
+      "description": "Normalized energy-meter snapshots ingested from an OPC UA source via the ORCE industrial ingestion reference flow",
+      "assetType": "iot.timeseries",
+      "format": "kafka/json",
+      "schema": "bronze",
+      "topic": "opcua.ingest.raw",
+      "table": "opcua_ingest_raw"
+    },
+    "offers": [
+      {
+        "id": "offer:facis:opcua-ingest-raw:read",
+        "policySummary": {
+          "purpose": "analytics",
+          "rate_limit": "10 req/min",
+          "ttl": "PT1H"
+        }
+      }
+    ]
   }
 ]
