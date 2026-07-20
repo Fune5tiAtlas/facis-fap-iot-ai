@@ -51,7 +51,11 @@ def create_app() -> FastAPI:
 
     if _OPENAPI_SPEC.exists():
         with open(_OPENAPI_SPEC, encoding="utf-8") as file:
-            app.openapi_schema = yaml.safe_load(file)
+            spec = yaml.safe_load(file)
+        # Overriding the openapi() method is the version-stable way to serve
+        # a hand-written spec; plain assignment to app.openapi_schema is not
+        # honored by every FastAPI release.
+        app.openapi = lambda: spec  # type: ignore[method-assign]
     else:
         logger.warning(
             "OpenAPI spec file not found at %s. Falling back to auto-generated schema.",
