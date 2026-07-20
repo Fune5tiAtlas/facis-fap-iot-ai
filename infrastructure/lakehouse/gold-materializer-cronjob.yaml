@@ -49,18 +49,30 @@ spec:
             app: facis-gold-materializer
         spec:
           restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
           initContainers:
           - name: install-deps
-            image: python:3.11-slim
+            image: python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99
             command: ["/bin/sh", "-c"]
             args:
             - pip install --target=/deps trino requests tabulate 2>&1 | tail -1
             volumeMounts:
             - name: deps
               mountPath: /deps
+            securityContext:
+              allowPrivilegeEscalation: false
+              # pip needs a writable rootfs to unpack into its cache/HOME;
+              # the runtime container below runs read-only.
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop: [ALL]
           containers:
           - name: materializer
-            image: python:3.11-slim
+            image: python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99
             command: ["/bin/sh", "-c"]
             args:
             - |
@@ -76,6 +88,11 @@ spec:
               limits:
                 cpu: "1"
                 memory: 512Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
             volumeMounts:
             - name: deps
               mountPath: /deps
@@ -86,9 +103,14 @@ spec:
             - name: credentials
               mountPath: /config
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           volumes:
           - name: deps
             emptyDir: {}
+          - name: tmp
+            emptyDir:
+              sizeLimit: 64Mi
           - name: scripts
             configMap:
               name: facis-gold-scripts
