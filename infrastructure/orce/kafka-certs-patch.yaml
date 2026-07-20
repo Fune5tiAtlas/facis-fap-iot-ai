@@ -4,9 +4,8 @@
 # paths for sslCaLocation / sslCertLocation / sslKeyLocation.
 #
 # The certs themselves live in the `facis-kafka-certs` Secret in the `orce`
-# namespace. That Secret is created out-of-band from
-# `Credentials and configs/credentials.txt` and is NOT in source — never
-# commit cert material to git.
+# namespace. That Secret is created out-of-band from the team credential
+# store and is NOT in source — never commit cert material to git.
 #
 # Apply:
 #   kubectl create secret generic facis-kafka-certs -n orce \
@@ -16,7 +15,7 @@
 #
 # WARNING: Stackable's secret-operator issues short-lived client certs
 # (~3 months in this case). When tls.crt approaches expiry, refresh both
-# the file in `Credentials and configs/credentials.txt` and the Secret here.
+# the team credential store and the Secret here.
 spec:
   template:
     spec:

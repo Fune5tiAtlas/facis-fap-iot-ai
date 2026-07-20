@@ -161,7 +161,7 @@ by remounting and Pod-restarting ORCE. The Helm chart is otherwise stateless.
 
 Stackable's secret-operator issues short-lived client certs (currently
 ~3 months). `Secret/facis-kafka-certs` in the `orce` namespace is a static
-copy created from `Credentials and configs/credentials.txt`. When the cert
+copy created from the team credential store. When the cert
 gets within 14 days of expiry, `FacisKafkaCertExpiringSoon` fires (warning);
 within 7 days, `FacisKafkaCertExpiringCritical` fires (page-worthy).
 
