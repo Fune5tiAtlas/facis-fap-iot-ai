@@ -1,0 +1,77 @@
+{{- if .Values.dsp.pg.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-state-postgres
+spec:
+  serviceName: {{ include "facis-dsp-connector.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "facis-dsp-connector.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dsp-state-postgres
+  template:
+    metadata:
+      labels:
+        {{- include "facis-dsp-connector.labels" . | nindent 8 }}
+        app.kubernetes.io/component: dsp-state-postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: "{{ .Values.dsp.pg.image.repository }}:{{ .Values.dsp.pg.image.tag }}"
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.dsp.pg.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.dsp.pg.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "facis-dsp-connector.fullname" . }}-dsp-secrets
+                  key: DSP_PG_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              # Postgres refuses to initdb into a volume root that carries a
+              # lost+found directory, so keep the data cluster in a subdir.
+              subPath: pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.dsp.pg.user | quote }}, "-d", {{ .Values.dsp.pg.database | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.dsp.pg.storageSize }}
+        {{- with .Values.dsp.pg.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+{{- end }}

@@ -42,9 +42,10 @@ Rendered in both modes:
   coordinator address — the Trino coordinator lives on a separate Stackable
   cluster whose internal DNS name does not resolve from the ORCE pod),
   SFTP_KAFKA_BROKERS (`dsp.kafkaBrokers` — full broker list for the
-  consumer-side ingest flow's `${SFTP_KAFKA_BROKERS}` substitution), plus the
-  NF-1 identity values under `dsp.iam.*`. Consumed by the ORCE pod via
-  `envFrom`.
+  consumer-side ingest flow's `${SFTP_KAFKA_BROKERS}` substitution), the NF-1
+  identity values under `dsp.iam.*`, and — when `dsp.pg.enabled` — DSP_PG_PASSWORD
+  + DSP_PG_URI (`postgresql://<user>:<password>@<fullname>-postgres:5432/<database>`)
+  for the state store. Consumed by the ORCE pod via `envFrom`.
 - `PersistentVolumeClaim/facis-dsp-state` — backs `/data/dsp-state/` on the
   ORCE pod for `transfers.json` + `negotiations.json`.
 - `StatefulSet/<fullname>-mongo` + `Service/<fullname>-mongo` — self-contained
@@ -52,6 +53,13 @@ Rendered in both modes:
   issued/self-issued VCs, see `facis-dsp-iam-hub.json`). Unlike the
   prerequisites below, this is entirely within this chart — no cross-chart
   wiring needed. Disable with `dsp.iam.mongo.enabled=false`.
+- `StatefulSet/<fullname>-postgres` + `Service/<fullname>-postgres` (port 5432)
+  — self-contained PostgreSQL instance backing DSP transfer/negotiation state
+  (SRS §6.1). Single replica, PVC mounted at `/var/lib/postgresql/data`
+  (`subPath: pgdata`), `pg_isready` readiness probe. `POSTGRES_PASSWORD` comes
+  from the `-dsp-secrets` Secret's `DSP_PG_PASSWORD` key; the state flow reaches
+  it via `DSP_PG_URI`. Configured under `dsp.pg.*` — disable with
+  `dsp.pg.enabled=false`.
 - `Job/<fullname>-orce-flow-deploy` — post-install/upgrade hook. Polls the
   target ORCE Admin API until ready, fetches its live flow set, merges this
   chart's tabs into it by node id (never a full-replace — see the Job script's

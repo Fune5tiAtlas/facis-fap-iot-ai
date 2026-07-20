@@ -181,6 +181,20 @@ dsp:
   #    drift on Stackable restarts and are maintained live by the
   #    kafka-broker-watcher CronJob).
   kafkaBrokers: 212.132.83.222:9093
+  # -- PostgreSQL backing store for DSP transfer/negotiation state (SRS §6.1).
+  #    Deployed by this chart as a single-replica StatefulSet; the state flow
+  #    reads DSP_PG_URI from the rendered secret.
+  pg:
+    enabled: true
+    image:
+      repository: postgres
+      tag: "16.4"
+    database: dsp_state
+    user: dsp
+    # -- REQUIRED. Generate with: openssl rand -hex 16
+    password: ""
+    storageSize: 1Gi
+    storageClassName: ""
 
 # ---------------------------------------------------------------------------
 # State Persistence

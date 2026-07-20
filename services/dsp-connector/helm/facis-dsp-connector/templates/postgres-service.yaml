@@ -1,0 +1,19 @@
+{{- if .Values.dsp.pg.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "facis-dsp-connector.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "facis-dsp-connector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-state-postgres
+spec:
+  clusterIP: None
+  ports:
+    - port: 5432
+      targetPort: postgres
+      name: postgres
+  selector:
+    {{- include "facis-dsp-connector.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: dsp-state-postgres
+{{- end }}
