@@ -141,3 +141,19 @@ test('opcua flow: init registers all 13 metrics as Double variables', () => {
         assert.ok(init.func.includes(`'${m}'`), `metric ${m} missing from init`);
     }
 });
+
+test('opcua flow: registration self-heals via catch -> rate limit -> init', () => {
+    const flow = readFlow();
+    const c = flow.find((n) => n.type === 'catch' && (n.scope || []).includes('opcua-server-config'));
+    assert.ok(c, 'catch node scoped to the OPC UA server');
+    const limiter = flow.find((n) => n.id === c.wires[0][0]);
+    assert.equal(limiter.type, 'delay');
+    assert.equal(limiter.pauseType, 'rate');
+    assert.equal(limiter.drop, true);
+    assert.deepEqual(limiter.wires[0], ['fn-opcua-init']);
+});
+
+test('opcua flow: initial registration waits out server boot', () => {
+    const inj = readFlow().find((n) => n.id === 'inject-opcua-init');
+    assert.ok(Number(inj.onceDelay) >= 15);
+});

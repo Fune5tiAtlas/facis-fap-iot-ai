@@ -51,7 +51,7 @@
     "id": "inject-opcua-init",
     "type": "inject",
     "z": "tab-opcua",
-    "name": "on start (register variables)",
+    "name": "on start (register variables, 15s boot grace)",
     "props": [
       {
         "p": "payload"
@@ -60,7 +60,7 @@
     "repeat": "",
     "crontab": "",
     "once": true,
-    "onceDelay": "5",
+    "onceDelay": 15,
     "topic": "",
     "payload": "",
     "payloadType": "str",
@@ -77,7 +77,7 @@
     "type": "function",
     "z": "tab-opcua",
     "name": "register address space",
-    "func": "// Register the demo energy-meter address space (13 Double variables).\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\nconst msgs = METRICS.map((m) => ({\n    payload: { opcuaCommand: 'addVariable' },\n    topic: 'ns=1;s=FACIS.EnergyMeter.' + m + ';datatype=Double;value=0'\n}));\nnode.send([msgs]);\nreturn null;\n",
+    "func": "// Re-entrant: also re-triggered (rate-limited) by the catch node when\n// the server rejects variable updates — covers cold boots where the\n// server's address space is not ready when the once-inject fires.\n// Register the demo energy-meter address space (13 Double variables).\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\nconst msgs = METRICS.map((m) => ({\n    payload: { opcuaCommand: 'addVariable' },\n    topic: 'ns=1;s=FACIS.EnergyMeter.' + m + ';datatype=Double;value=0'\n}));\nnode.send([msgs]);\nreturn null;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -145,5 +145,47 @@
     "x": 320,
     "y": 60,
     "wires": []
+  },
+  {
+    "id": "catch-opcua-server",
+    "type": "catch",
+    "z": "tab-opcua",
+    "name": "server update failures",
+    "scope": [
+      "opcua-server-config"
+    ],
+    "uncaught": false,
+    "x": 180,
+    "y": 320,
+    "wires": [
+      [
+        "delay-opcua-reregister"
+      ]
+    ]
+  },
+  {
+    "id": "delay-opcua-reregister",
+    "type": "delay",
+    "z": "tab-opcua",
+    "name": "re-register at most every 10s",
+    "pauseType": "rate",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "10",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": true,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 420,
+    "y": 320,
+    "wires": [
+      [
+        "fn-opcua-init"
+      ]
+    ]
   }
 ]
