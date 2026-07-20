@@ -649,7 +649,10 @@ class TestPipelineSetupScript:
             os.path.dirname(__file__),
             "..",
             "..",
-            "scripts",
+            "..",
+            "..",
+            "infrastructure",
+            "lakehouse",
             "setup_nifi_mqtt_to_kafka.py",
         )
         assert os.path.exists(script_path), f"Setup script not found: {script_path}"
@@ -663,7 +666,10 @@ class TestPipelineSetupScript:
             os.path.dirname(__file__),
             "..",
             "..",
-            "scripts",
+            "..",
+            "..",
+            "infrastructure",
+            "lakehouse",
             "setup_nifi_mqtt_to_kafka.py",
         )
         spec = importlib.util.spec_from_file_location(
