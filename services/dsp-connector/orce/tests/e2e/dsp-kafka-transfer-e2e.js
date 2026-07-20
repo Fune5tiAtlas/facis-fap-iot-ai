@@ -7,8 +7,8 @@
 //
 // Requires: a reachable live cluster, `kcat` on PATH (brew install kcat), and
 // the mTLS client PEMs on local disk (default /tmp/facis-kafka-certs/ —
-// same material as Secret/facis-kafka-certs in the orce namespace, sourced
-// from `Credentials and configs/credentials.txt`).
+// same material as Secret/facis-kafka-certs in the orce namespace; extract
+// from that Secret or your credential store).
 // Not part of `npm test` — run manually per orce/README.md's NF-3 section.
 //
 // Usage:
