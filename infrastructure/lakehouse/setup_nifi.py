@@ -386,8 +386,10 @@ def create_ingestion_flow(
     putsql = client.create_processor(pg_id, PROC_PUTSQL,
         f"Trino INSERT: {table}",
         {
+            # putsql-sql-statement is deliberately ABSENT: PutSQL's validator
+            # rejects an empty string; leaving the property unset makes the
+            # processor execute the SQL carried in flowfile content.
             "JDBC Connection Pool": jdbc_svc_id,
-            "putsql-sql-statement": "",
             "database-session-autocommit": "true",
             "Support Fragmented Transactions": "false",
         },
