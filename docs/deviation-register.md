@@ -15,7 +15,7 @@ reviewable in one place rather than being rediscovered from the code.
 - [D-2 — Single-replica ORCE runtime for DSP connector state (NF-5)](#d-2--single-replica-orce-runtime-for-dsp-connector-state-nf-5)
 - [D-3 — Encryption at rest without an external KMS (NF-8)](#d-3--encryption-at-rest-without-an-external-kms-nf-8)
 - [D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)](#d-4--kafka-streaming-transfers-without-in-band-credentials-or-per-agreement-acls-nf-3--fr-dp-002--q-15)
-- [D-5 — Dual DSP implementation surface: Python and ORCE (NF-5 / NF-7)](#d-5--dual-dsp-implementation-surface-python-and-orce-nf-5--nf-7)
+- [D-5 — DSP TCK conformance scope: asynchronous state machine and consumer-role tests (NF-7)](#d-5--dsp-tck-conformance-scope-asynchronous-state-machine-and-consumer-role-tests-nf-7)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
 
@@ -173,31 +173,40 @@ which is a cluster-infrastructure decision gate, not connector code.
 
 **Approval status**: `Pending — RFC to client/PMO (Kafka credential-delivery model)`.
 
-## D-5 — Dual DSP implementation surface: Python and ORCE (NF-5 / NF-7)
+## D-5 — DSP TCK conformance scope: asynchronous state machine and consumer-role tests (NF-7)
 
-**Requirement**: A single, coherent DSP connector implementation whose behaviour
-and conformance are assessed against one code path.
+**Requirement**: The Eclipse DSP TCK transfer suite (`dsp-tp`), run to 100%,
+which exercises the full asynchronous DSP transfer-process state machine and,
+under the same JUnit tag, consumer-role behaviours.
 
-**Implementation**: The delivered, live DSP connector is the **ORCE-native**
-implementation — the Node-RED flows under `services/dsp-connector/orce/flows/`,
-deployed on the dedicated ORCE runtime. An earlier **Python** implementation
-(`services/dsp-connector/src/`) also exists in the tree; it is not the deployed
-runtime and its stub/in-memory behaviours are the ones the review recorded. All
-remediation (identity, ingest, Kafka provisioning, state persistence, typed
-errors) has been built on the ORCE path only.
+**Implementation**: The connector implements the DSP transfer binding surface the
+TCK drives against a provider — the canonical message endpoints
+(`POST /dsp/transfers/request`, `GET /dsp/transfers/:providerPid`,
+`POST /dsp/transfers/:providerPid/{start,completion,termination,suspension}`)
+mapped onto the existing transfer FSM — and returns DSP 2025-1 JSON-LD
+`Catalog`/`Dataset` responses for the catalogue suite (`dsp-cat`). Two binding
+behaviours are **not** implemented: (a) the connector does not deliver
+asynchronous DSP state-callback messages to a consumer's callback address — its
+transfer FSM resolves synchronously; (b) consumer-role tests are out of the
+assessed surface. Both are recorded here as scope decisions; the per-gap ruling
+is in `services/dsp-connector/tck/SCOPE-RULING.md`. A separate item — the
+creation-ACK status code (DSP binding 201 vs SRS §7.1.3's 202) — is a
+requirement-set conflict routed to PMO under NF-11, not a deviation.
 
-**Justification**: The TDR mandates the ORCE runtime for service execution, so
-the ORCE flows are the authoritative implementation; the Python service predates
-that mandate. Re-implementing every remediation twice, or deleting the Python
-tree mid-remediation, was not warranted for a demonstrator — the ORCE path is
-the one deployed, tested, and assessed.
+**Justification**: FACIS is assessed as a DSP **provider** for a
+single-participant demonstrator. A full asynchronous transfer state machine with
+outbound callback delivery, and the consumer-role half of the TCK, exceed that
+scope; the TCK 1.0.1 tooling also offers no provider-only tag to exclude the
+consumer tests cleanly. The error-payload precondition (typed DSP 2025-1 error
+objects) and the provider binding surface are implemented so the TCK produces
+meaningful provider-side evidence.
 
-**Residual risk & mitigation**: The presence of two implementations invites
-confusion about which is authoritative, and TCK/error-shape conformance is only
-meaningful against the deployed ORCE path. Mitigated by documenting the ORCE
-flows as the deployed runtime throughout (`services/dsp-connector/orce/README.md`,
-`docs/architecture/fap-role-mapping.md`) and by scoping all conformance evidence
-to that path. Removing the superseded Python service is a defined cleanup
-follow-up, not a functional change.
+**Residual risk & mitigation**: The transfer suite will not reach 100% while the
+asynchronous and consumer-role tests remain unaddressed, so the TCK evidence is a
+provider-scoped partial pass rather than a full pass. Mitigated by the scope-ruling
+document mapping every expected failure to its cause and disposition, by
+implementing the provider binding surface and catalogue JSON-LD so the pass rate
+reflects real conformance, and by routing the one genuine requirement conflict
+(201 vs 202) to PMO rather than silently diverging.
 
-**Approval status**: `Pending — demonstrator scope`.
+**Approval status**: `Pending — demonstrator scope; ACK status code pending PMO ruling (NF-11)`.

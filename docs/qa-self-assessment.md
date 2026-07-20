@@ -8,7 +8,8 @@ is outstanding), **Deviation** (recorded in the deviation register), or **Open**
 
 Status is scoped to the deployed **ORCE-native** DSP connector (the Node-RED
 flows under `services/dsp-connector/orce/`), which is the runtime the TDR
-mandates; see deviation D-5 on the superseded Python surface.
+mandates. The connector has no Python implementation — the DSP connector is
+ORCE-only.
 
 ## Verdict-decisive items (NF-1 – NF-4)
 
@@ -25,7 +26,7 @@ mandates; see deviation D-5 on the superseded Python surface.
 |---|---|---|---|
 | **NF-5** | State persistence (SRS §6.1, PostgreSQL) | **Met** | Postgres StatefulSet + `DSP_PG_URI`; `facis-dsp-state.json` (DDL bootstrap, one-time legacy migration, transactional snapshot, boot retry, readiness guard); both stores global-scoped (fixed a bug that made transfer persistence a silent no-op); kill-pod durability drill passes live (`services/dsp-connector/orce/README.md` §Durability drill). Deviation D-2 covers the single-replica runtime. |
 | **NF-6** | Header-trust / policy enforcement (FR-DL-010/011) | **Met** | AI-insight authorization derived from verified Keycloak tokens (`ai-insight-auth.json`), roles taken only from verified claims; header-injection negative test (`policy-rate-limit.spec.js`); DSP transfer path checks negotiation FINALIZED + counterparty DID (`dsp-tx-agreement-check`). |
-| **NF-7** | DSP TCK & error payload (FR-DSP-001) | **Partial** | Typed DSP 2025-1 JSON-LD error bodies (`@context`/`@type`/pids/code/reason) + payload-shape tests (`dsp-error-binding.spec.js`) — **Met**. TCK harness + conformance gap register present (`services/dsp-connector/tck/`), but the TCK is **not yet run to 100%**; five binding-level gaps are registered. Closing requires a TCK run and a scope ruling on the open gaps. |
+| **NF-7** | DSP TCK & error payload (FR-DSP-001) | **Partial** | Typed DSP 2025-1 JSON-LD error bodies (`@context`/`@type`/pids/code/reason) + payload-shape tests (`dsp-error-binding.spec.js`) — **Met**. TCK harness + conformance gap register present (`services/dsp-connector/tck/`). Scope ruling recorded (`services/dsp-connector/tck/SCOPE-RULING.md`): the provider binding surface (canonical transfer paths + `dcat` catalogue JSON-LD) is implemented; asynchronous callbacks and consumer-role tests are demonstrator-scope deviations (D-5); the 201-vs-202 ACK conflict is a PMO ruling (NF-11). A TCK run against the cluster captures the provider-scoped evidence. |
 | **NF-8** | TLS 1.3 / S3 SSE / KMS / NetworkPolicies | **Met** (TLS, SSE) + **Deviation D-3** (KMS) + policies | TLS 1.3 minimum enforced at the ingress with a re-runnable evidence scan (`infrastructure/tls/`); S3 default encryption SSE-S3/AES256 enabled (`infrastructure/s3/`); external KMS proven infeasible on IONOS → deviation D-3; NetworkPolicies for the DSP datastores added to the chart (Postgres/Mongo reachable only from the DSP ORCE pod). Superset's separate LB TLS floor is called out as a distinct follow-up. |
 | **NF-9** | Load tests (thresholds + p95) | **Partial** | k6/Python scripts exist for every threshold + a p95 report aggregator (`perf/`); not yet run against the cluster, so no captured p95 evidence. Closing requires a run. |
 | **NF-10** | IONOS runtime evidence (rolling update, health) | **Partial** | Readiness probes present; the NF-5 kill-pod drill demonstrates in-flight state surviving pod loss (rolling-update evidence). Full helm install/upgrade/uninstall capture against the QA cluster is a run item. |
@@ -39,4 +40,4 @@ mandates; see deviation D-5 on the superseded Python surface.
 
 - **Runs** (need the QA cluster): NF-7 TCK to 100% (plus a scope ruling on the five registered gaps), NF-9 load-test p95 capture, NF-10 helm lifecycle capture.
 - **Client/PMO decisions** (RFCs): D-1 (Q-03 Data-Sink), D-3 (object-store KMS), D-4 (Kafka credential model), and the NF-11 requirement-set ruling.
-- **Cleanup follow-ups**: remove the superseded Python DSP service (D-5); Superset subdomain TLS floor; broaden rate-limit enforcement (NF-12).
+- **Cleanup follow-ups**: Superset subdomain TLS floor; broaden rate-limit enforcement (NF-12).
