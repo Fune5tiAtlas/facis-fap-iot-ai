@@ -180,6 +180,10 @@ jobs:
         with:
           node-version: "20"
 
+      - name: DSP Connector — install dev deps (jose, jsonld)
+        working-directory: services/dsp-connector/orce/tests
+        run: npm install --include=dev
+
       - name: DSP Connector — flow specs
         working-directory: services/dsp-connector/orce/tests
         run: node --test flows/*.spec.js

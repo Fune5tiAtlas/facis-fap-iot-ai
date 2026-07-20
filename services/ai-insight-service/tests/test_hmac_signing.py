@@ -186,7 +186,9 @@ class TestVerifyToken:
             roles="consumer",
         )
 
-    def test_empty_agreement_id_and_roles_still_verify(self, signer: HmacSigner) -> None:
+    def test_empty_agreement_id_and_roles_still_verify(
+        self, signer: HmacSigner
+    ) -> None:
         # Legacy/off-mode parity: fields present but empty must still round-trip.
         result = signer.generate_signed_url(
             base_url="https://data.example",

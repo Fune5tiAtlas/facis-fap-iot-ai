@@ -8,6 +8,7 @@ Supports multiple Unit IDs (one per simulated meter).
 import asyncio
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from pymodbus.datastore import (
     ModbusDeviceContext,
@@ -15,6 +16,9 @@ from pymodbus.datastore import (
     ModbusSparseDataBlock,
 )
 from pymodbus.server import StartAsyncTcpServer
+
+if TYPE_CHECKING:
+    from pymodbus.datastore import ModbusSimulatorContext
 
 from src.models.meter import MeterReading
 from src.simulators.energy_meter.ieee754 import float32_to_registers
@@ -180,7 +184,9 @@ class ModbusTCPServer:
         Returns:
             Configured ModbusServerContext.
         """
-        slaves: dict[int, ModbusDeviceContext] = {}
+        # dict is invariant in its value type; pymodbus's ModbusServerContext
+        # accepts dict[int, ModbusDeviceContext | ModbusSimulatorContext].
+        slaves: dict[int, ModbusDeviceContext | ModbusSimulatorContext] = {}
 
         for unit_id, meter_id in self._unit_ids.items():
             # Create a data block for this meter
