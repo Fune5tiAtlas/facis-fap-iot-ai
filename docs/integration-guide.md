@@ -103,15 +103,15 @@
 
 2. **Message Broker**: MQTT and Kafka topics receive simulation data. MQTT is used for lightweight QoS-aware messaging; Kafka is used for reliable stream processing and consumer group management.
 
-3. **ORCE (Optional Relay)**: Node-RED flows can subscribe to MQTT/Kafka topics and re-publish or transform data for custom integrations.
+3. **ORCE (Flow Runtime)**: Node-RED flows can subscribe to MQTT/Kafka topics and re-publish or transform data for custom integrations. The Industrial Ingestion Pattern flows (`services/industrial-ingestion-service/`) also run here, connecting OPC UA and Modbus TCP sources to the Kafka Bronze topics (see `docs/industrial-ingestion-pattern.md`).
 
 4. **NiFi Ingestion**: Consumes Kafka topics via KafkaConsumer processors, validates schema, and writes raw data to Bronze Layer in S3/MinIO.
 
 5. **Bronze Layer (Raw Data)**: Unstructured ingested data stored as Parquet/ORC files partitioned by timestamp.
 
-6. **Silver Layer (Cleaned)**: NiFi processors apply schema enforcement, deduplication, and basic transformations. Data is stored as Iceberg tables for ACID compliance and time-travel.
+6. **Silver Layer (Cleaned)**: Trino views over the Bronze tables apply typed extraction (`json_extract_scalar`), timestamp casting, and data-quality filtering (see `services/simulation/docs/guides/lakehouse-reference.md`).
 
-7. **Gold Layer (Aggregated Views)**: Spark or Trino SQL jobs aggregate Silver data into optimized analytical views:
+7. **Gold Layer (Aggregated Views)**: Trino SQL views aggregate Silver data into optimized analytical views:
    - **net_grid_hourly**: Hourly grid consumption/generation aggregates
    - **event_impact_daily**: Daily event impact summary
    - **streetlight_zone_hourly**: Smart city lighting analytics
