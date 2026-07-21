@@ -457,3 +457,18 @@ mkdir -p /tmp/facis-kafka-certs   # ca.crt, tls.crt, tls.key
 cd ../../orce/tests
 node e2e/dsp-kafka-transfer-e2e.js --env-file .env.cluster
 ```
+
+## Rate limiting (data plane)
+
+`GET /api/data/:assetId` enforces a per-agreement sliding window (default
+10 requests/minute, `DSP_RATE_LIMIT__REQUESTS_PER_MINUTE`;
+`DSP_RATE_LIMIT__ENABLED=false` to disable) returning `429` with a
+`Retry-After` header. The limiter key is the HMAC-bound `agreementId`, so it
+cannot be spoofed independently of the signed URL.
+
+Semantics, stated plainly (NF-12): this is an **in-memory sliding window in
+Node-RED global context**, not a Redis token bucket. It is per-process — the
+window resets on pod restart and would multiply across replicas — which is
+bounded in practice by the single-replica ORCE runtime recorded in deviation
+D-2 (`docs/deviation-register.md`). Any externalized (e.g. Redis-backed)
+limiter is a follow-up tied to scaling that runtime out.
