@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS bronze.<table_name> (
 )
 WITH (
     format = 'PARQUET',
-    partitioning = ARRAY['day(ingestion_timestamp)']
+    partitioning = ARRAY['hour(ingestion_timestamp)']
 )
 ```
 
@@ -377,7 +377,7 @@ See [Deployment & Operations](../deployment/deployment-operations.md) for full N
 | Trino JDBC driver | Must be present on each NiFi node; currently deployed to `/tmp/jdbc/` (requires volume mount for persistence) |
 | Silver view performance | Views query raw JSON; for high-volume production, consider materializing Silver as Iceberg tables |
 | Gold view joins | Cross-feed joins (net_grid_hourly, energy_cost_daily, pv_self_consumption_daily) depend on time alignment; timestamp truncation to hour/day ensures correct joins |
-| S3 partitioning | Bronze tables are partitioned by `day(ingestion_timestamp)` for efficient time-range pruning |
+| S3 partitioning | Bronze tables are partitioned by `hour(ingestion_timestamp)` for efficient time-range pruning |
 | OIDC token expiry | Keycloak tokens are short-lived; long-running scripts must refresh tokens between query batches (see `fresh_conn()` in validate_lakehouse.py) |
 | Anomaly detection | `gold.anomaly_candidates` uses z-scores (>2σ) and may return zero rows for well-behaved data — this is expected, not an error |
 | Correlated subqueries | Trino does not support correlated subqueries inside GROUP BY; use proper JOINs between pre-aggregated subqueries instead |
