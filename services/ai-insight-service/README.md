@@ -1,44 +1,46 @@
 # FACIS AI Insight Service
 
-FastAPI service for governed AI insight generation from energy and IoT datasets.
+Governed AI insight generation from energy and IoT datasets. This service is
+**ORCE-native**: the runtime is the Node-RED (ORCE) flows under
+[`orce/`](orce/). The former Python/FastAPI implementation has been removed —
+the ORCE flows serve the same HTTP contract.
 
 ## What This Service Provides
 
 - Governed insight endpoints (`anomaly-report`, `city-status`, `energy-summary`)
-- Header-based policy checks and agreement-scoped rate limiting
+- Verified-token authorization (Keycloak) and agreement-scoped rate limiting
 - Trino-backed analytics context for deterministic insight pipelines
 - OpenAI-compatible LLM summarization with rule-based fallback behavior
-- Optional Redis caching and output retrieval endpoints
+- Output retrieval endpoints
 
-## Quick Start (Local)
+## Runtime (ORCE)
 
-```bash
-cd services/ai-insight-service
-cp .env.example .env
-pip install -e ".[dev]"
-python -m src.main
-```
+The flows and their runtime live under [`orce/`](orce/README.md). Endpoints:
 
-Health check:
+- `GET /api/v1/health`
+- `POST /api/v1/insights/{anomaly-report,energy-summary,city-status}`
+- `GET /api/v1/insights/latest`
+- `GET /api/ai/outputs/{output_id}`
+- `GET /openapi.json`, `/docs`, `/redoc`
 
-```bash
-curl http://localhost:8080/api/v1/health
-```
+Authorization derives from verified Keycloak access tokens (roles from
+`realm_access.roles`); see [`docs/api/verified-token-authz.md`](docs/api/verified-token-authz.md).
 
-API docs:
-
-- `http://localhost:8080/docs`
-- `http://localhost:8080/redoc`
+Tests: `cd orce && npm run test:flows`.
 
 ## Documentation
 
 - [Documentation hub](docs/README.md)
-- [Developer guide](docs/guides/index.md)
-- [Setup guide](docs/guides/setup.md)
-- [Architecture guide](docs/guides/architecture.md)
-- [Configuration guide](docs/guides/configuration.md)
-- [REST API reference](docs/api/rest-api.md)
 - [OpenAPI contract](docs/openapi.yaml)
+- [REST API reference](docs/api/rest-api.md)
+- [Verified-token authorization](docs/api/verified-token-authz.md)
+
+Deployment: the ORCE runtime is built from [`orce/`](orce/) (its own
+Dockerfile bundles the flows onto the `xfsc-orce` base). The former Python-app
+deployment (`helm/facis-ai-insight`, `k8s/`) has been removed.
+
+> Note: `docs/guides/*` and `docs/deployment/*` still describe the old Python
+> deployment and are pending a documentation refresh.
 
 ## Governance and Compliance
 

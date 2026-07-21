@@ -1,5 +1,0 @@
-service:
-  environment: production
-
-logging:
-  level: INFO
