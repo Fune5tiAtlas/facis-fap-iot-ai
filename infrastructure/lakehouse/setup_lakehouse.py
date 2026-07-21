@@ -232,8 +232,14 @@ CREATE TABLE IF NOT EXISTS "{catalog}".bronze.{table} (
     raw_value            VARCHAR
 )
 WITH (
+    -- Hourly partitioning on the ingestion timestamp (SRS granularity).
+    -- Iceberg records the partition spec at table-creation time, so tables
+    -- created before this changed from day() to hour() keep their existing
+    -- spec until re-provisioned (drop + --add-bronze-table, or CREATE anew);
+    -- Bronze data is regenerable from the sources, so a re-provision migrates
+    -- the granularity without data-loss risk.
+    partitioning = ARRAY['hour(ingestion_timestamp)'],
     format = 'PARQUET',
-    partitioning = ARRAY['day(ingestion_timestamp)'],
     location = '{location}'
 )
 """

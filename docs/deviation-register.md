@@ -17,6 +17,7 @@ reviewable in one place rather than being rediscovered from the code.
 - [D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)](#d-4--kafka-streaming-transfers-without-in-band-credentials-or-per-agreement-acls-nf-3--fr-dp-002--q-15)
 - [D-5 — DSP TCK conformance scope: asynchronous state machine and consumer-role tests (NF-7)](#d-5--dsp-tck-conformance-scope-asynchronous-state-machine-and-consumer-role-tests-nf-7)
 - [D-6 — Shared ORCE runtime updates via Recreate, not zero-downtime rolling (NF-10 / test 25)](#d-6--shared-orce-runtime-updates-via-recreate-not-zero-downtime-rolling-nf-10--test-25)
+- [Resolved — no deviation required](#resolved--no-deviation-required)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
 
@@ -248,3 +249,31 @@ ORCE global context to allow multi-replica rolling is the defined follow-up,
 shared with [[D-2]].
 
 **Approval status**: `Pending — demonstrator scope; rolling-update exemption for the shared ORCE tier`.
+
+
+## Resolved — no deviation required
+
+Several items the review flagged as candidate deviations were **fixed** rather
+than deviated. They are recorded here so the register is a complete account of
+every flagged item, not only the ones that remain divergent.
+
+- **TLS 1.3 minimum-version** (NF-8): enforced at the application ingress
+  (`ssl-protocols: TLSv1.3`), with a re-runnable evidence scan
+  (`infrastructure/tls/verify-tls.sh`) confirming TLS 1.2/1.1 are refused. Not a
+  deviation — the requirement is met. (D-3 covers only the separate KMS point.)
+- **In-memory state store** (NF-5): DSP transfer and negotiation state is now
+  persisted in **PostgreSQL** per SRS §6.1 (`facis-dsp-state` flow +
+  `postgres-statefulset.yaml`), demonstrated durable across pod kills. Not a
+  deviation — the in-memory concern is resolved. What remains registered is the
+  single-replica runtime only (D-2).
+- **Dual DSP implementation (Python and ORCE)** (NF-5 / NF-7): there is **no**
+  Python DSP connector — the earlier Python implementation was removed, and the
+  connector is ORCE-native only, as the TDR mandates
+  (`git ls-files services/dsp-connector/src/` returns nothing). Not a deviation —
+  there is a single implementation. (D-5 records the separate DSP TCK
+  conformance scope, which is unrelated to a dual implementation.)
+- **Bronze hourly partitioning** (NF-15): the Bronze table DDL partitions by
+  `hour(ingestion_timestamp)` (`infrastructure/lakehouse/setup_lakehouse.py`).
+  Not a deviation — the requirement is met for tables provisioned from the
+  current source; pre-existing demonstrator tables re-partition on their next
+  re-provision (Bronze data is regenerable).
