@@ -16,6 +16,7 @@ reviewable in one place rather than being rediscovered from the code.
 - [D-3 — Encryption at rest without an external KMS (NF-8)](#d-3--encryption-at-rest-without-an-external-kms-nf-8)
 - [D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)](#d-4--kafka-streaming-transfers-without-in-band-credentials-or-per-agreement-acls-nf-3--fr-dp-002--q-15)
 - [D-5 — DSP TCK conformance scope: asynchronous state machine and consumer-role tests (NF-7)](#d-5--dsp-tck-conformance-scope-asynchronous-state-machine-and-consumer-role-tests-nf-7)
+- [D-6 — Shared ORCE runtime updates via Recreate, not zero-downtime rolling (NF-10 / test 25)](#d-6--shared-orce-runtime-updates-via-recreate-not-zero-downtime-rolling-nf-10--test-25)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
 
@@ -210,3 +211,40 @@ reflects real conformance, and by routing the one genuine requirement conflict
 (201 vs 202) to PMO rather than silently diverging.
 
 **Approval status**: `Pending — demonstrator scope; ACK status code pending PMO ruling (NF-11)`.
+
+## D-6 — Shared ORCE runtime updates via Recreate, not zero-downtime rolling (NF-10 / test 25)
+
+**Requirement**: QA acceptance test 25 requires a rolling update to complete
+without downtime; TDR #2/#19 require repeatable Helm deploy/redeploy/uninstall
+and zero-touch flow deployment with machine-readable errors.
+
+**Implementation**: The shared ORCE (Node-RED) Deployment
+(`services/simulation/k8s/orce/orce-deployment.yaml`) uses `strategy: Recreate`
+because all flow apps share one flows PVC that admits a single writer, and
+Node-RED holds authoritative working state in per-process global context (see
+[[D-2]]). An update therefore terminates the running pod before the replacement
+starts, producing a short request-handling gap. Stateless service Deployments
+(e.g. `ai-insight-service`) keep the default rolling strategy and update without
+downtime. Deploy/redeploy/uninstall repeatability and machine-readable
+flow-deploy status (`{"event":"orce-flow-deploy",...}` lines emitted by the
+merge-safe Jobs) are captured by the evidence harness in
+[`ops/acceptance/`](../ops/acceptance/README.md).
+
+**Justification**: Zero-downtime rolling of the shared ORCE pod is not
+achievable without either sharing/externalizing Node-RED global context across
+replicas or splitting each flow app onto its own runtime with its own claim —
+both beyond the single-participant demonstrator scope. `Recreate` is the correct
+strategy for a single-writer, stateful-in-memory workload: it prevents two pods
+writing the same PVC and the split-brain that concurrent global-context writers
+would cause.
+
+**Residual risk & mitigation**: A brief control-plane gap during ORCE updates
+(bounded by pod start + readiness, evidenced by
+`ops/acceptance/rolling-update-probe.sh` with `RECREATE_EXPECTED=1`, and by
+health-within-30s for the recovery bound). Mitigated by fast readiness probes on
+the ORCE pod, by running updates in maintenance windows, and by the stateless
+services carrying the zero-downtime rolling evidence for test 25. Externalizing
+ORCE global context to allow multi-replica rolling is the defined follow-up,
+shared with [[D-2]].
+
+**Approval status**: `Pending — demonstrator scope; rolling-update exemption for the shared ORCE tier`.
