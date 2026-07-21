@@ -117,6 +117,7 @@ spec:
               BODY=$(printf '%s' "$RESPONSE" | sed -e 's/___HTTP_STATUS___:[0-9]*$//')
               if [ "$HTTP_CODE" != "200" ]; then
                 echo "[orce-flow-deploy] FAIL fetching current flows: http $HTTP_CODE"
+                echo "{\"event\":\"orce-flow-deploy\",\"chart\":\"{{ .Chart.Name }}\",\"phase\":\"fetch-current\",\"status\":\"failed\",\"http_code\":\"$HTTP_CODE\"}"
                 echo "$BODY"
                 exit 1
               fi
@@ -158,8 +159,10 @@ spec:
 
               if [ "$HTTP_CODE" = "200" ]; then
                 echo "[orce-flow-deploy] deploy ok (single atomic POST /flows, nodes mode)"
+                echo "{\"event\":\"orce-flow-deploy\",\"chart\":\"{{ .Chart.Name }}\",\"phase\":\"post-flows\",\"status\":\"ok\",\"http_code\":\"$HTTP_CODE\"}"
               else
                 echo "[orce-flow-deploy] FAIL deploying merged flows: http $HTTP_CODE"
+                echo "{\"event\":\"orce-flow-deploy\",\"chart\":\"{{ .Chart.Name }}\",\"phase\":\"post-flows\",\"status\":\"failed\",\"http_code\":\"$HTTP_CODE\"}"
                 echo "$BODY"
                 exit 1
               fi
