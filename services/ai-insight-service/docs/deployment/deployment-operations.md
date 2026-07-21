@@ -85,7 +85,7 @@ The file requires the following variables:
 | `FACIS_ENV` | Environment selector (maps to config overlay) | `development`, `cluster`, `production` |
 | `AI_INSIGHT_LLM__API_KEY` | LLM provider API key | Your Azure OpenAI key |
 | `AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL` | LLM chat completions endpoint | `https://your-resource.openai.azure.com/...` |
-| `AI_INSIGHT_LLM__MODEL` | LLM model identifier | `gpt-4.1-mini`, `gpt-4-turbo` |
+| `AI_INSIGHT_LLM__MODEL` | LLM model identifier | `meta-llama/Llama-3.3-70B-Instruct`, `mistralai/Mistral-Small-24B-Instruct` |
 | `AI_INSIGHT_TRINO__HOST` | Trino coordinator hostname | `trino-coordinator.stackable.svc.cluster.local` |
 | `AI_INSIGHT_TRINO__PORT` | Trino coordinator port | `8443` |
 | `AI_INSIGHT_TRINO__OIDC_TOKEN_URL` | Keycloak token endpoint | `https://keycloak.example.com/realms/facis/protocol/openid-connect/token` |
@@ -173,7 +173,7 @@ AI_INSIGHT_HTTP__HOST=0.0.0.0
 AI_INSIGHT_HTTP__PORT=8080
 AI_INSIGHT_LLM__API_KEY=your-local-key
 AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL=http://localhost:8000/v1/chat/completions
-AI_INSIGHT_LLM__MODEL=gpt-4.1-mini
+AI_INSIGHT_LLM__MODEL=meta-llama/Llama-3.3-70B-Instruct
 AI_INSIGHT_TRINO__HOST=localhost
 AI_INSIGHT_TRINO__PORT=8080
 AI_INSIGHT_TRINO__HTTP_SCHEME=http
@@ -287,7 +287,7 @@ image:
   tag: "0.1.0"
 
 llm:
-  model: gpt-4.1-mini
+  model: meta-llama/Llama-3.3-70B-Instruct
   timeoutSeconds: 30
   maxRetries: 3
   requireHttps: true
@@ -501,7 +501,7 @@ Expected response structure:
   "recommendations": ["Recommendation 1", "Recommendation 2", ...],
   "metadata": {
     "output_id": "uuid",
-    "llm_model": "gpt-4.1-mini",
+    "llm_model": "meta-llama/Llama-3.3-70B-Instruct",
     "timestamp": "2026-04-05T14:30:00.123Z",
     "llm_used": true,
     "agreement_id": "agreement-001",

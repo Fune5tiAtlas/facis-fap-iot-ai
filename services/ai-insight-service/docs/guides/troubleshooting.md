@@ -572,7 +572,7 @@ curl -s http://localhost:8080/api/v1/health | jq '.config'
 curl -X POST \
   -H "Authorization: Bearer $AI_INSIGHT_LLM__API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}' \
+  -d '{"model":"meta-llama/Llama-3.3-70B-Instruct","messages":[{"role":"user","content":"hello"}]}' \
   "$AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL"
 ```
 

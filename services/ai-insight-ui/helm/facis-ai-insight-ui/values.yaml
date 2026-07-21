@@ -76,7 +76,9 @@ llmSecret:
   openaiApiKey: ""
   # -- Anthropic API key
   anthropicApiKey: ""
-  # -- Custom/self-hosted LLM key (optional — leave empty to disable)
+  # -- Custom / OpenAI-compatible LLM key. For the IONOS AI Model Hub default
+  #    (see llm.customLlmUrl) this is the IONOS Bearer token — a JWT minted in
+  #    the IONOS DCD Token Manager. Leave empty only if the endpoint needs no auth.
   customLlmKey: ""
   # -- Annotations for the Secret (e.g. for reloader.stakater.com/match: "true")
   annotations: {}
@@ -84,15 +86,24 @@ llmSecret:
 # ---------------------------------------------------------------------------
 # LLM Model Selection
 # ---------------------------------------------------------------------------
+# The out-of-box FACIS default provider is the IONOS AI Model Hub, wired through
+# the "custom" (OpenAI-compatible) branch of the LLM router — see customLlmUrl /
+# customLlmModel below. OpenAI and Anthropic remain fully configurable alternatives;
+# switch by sending selectedProvider=openai|claude from the UI.
 llm:
-  # -- OpenAI model identifier
+  # -- OpenAI model identifier (OpenAI-provider alternative; requires llmSecret.openaiApiKey)
   openaiModel: "gpt-4.1-mini"
-  # -- Anthropic model identifier
+  # -- Anthropic model identifier (Anthropic-provider alternative)
   anthropicModel: "claude-sonnet-4-20250514"
-  # -- URL for a custom / self-hosted LLM endpoint (empty = disabled)
-  customLlmUrl: ""
-  # -- Custom LLM model identifier
-  customLlmModel: "custom"
+  # -- Custom / OpenAI-compatible chat-completions endpoint. Default: IONOS AI Model Hub.
+  #    Empty disables the custom branch.
+  customLlmUrl: "https://openai.inference.de-txl.ionos.com/v1/chat/completions"
+  # -- Custom LLM model identifier. Default: an IONOS AI Model Hub model.
+  #    Model IDs are case-sensitive and must exist in your deployment's IONOS catalog —
+  #    confirm before deploying with:
+  #      GET https://openai.inference.de-txl.ionos.com/v1/models  (Bearer <IONOS token>)
+  #    Lighter documented alternative: mistralai/Mistral-Small-24B-Instruct
+  customLlmModel: "meta-llama/Llama-3.3-70B-Instruct"
 
 # ---------------------------------------------------------------------------
 # AI Insight Backend Service

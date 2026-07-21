@@ -52,13 +52,13 @@ stringData:
 #       key: anthropic-api-key
 # - name: FACIS_ANTHROPIC_MODEL
 #   value: "claude-sonnet-4-20250514"
-# - name: FACIS_CUSTOM_LLM_URL
-#   value: ""
+# - name: FACIS_CUSTOM_LLM_URL   # FACIS default provider (LLM router "else" branch)
+#   value: "https://openai.inference.de-txl.ionos.com/v1/chat/completions"
 # - name: FACIS_CUSTOM_LLM_KEY
 #   valueFrom:
 #     secretKeyRef:
 #       name: orce-llm-secrets
-#       key: custom-llm-key
+#       key: custom-llm-key       # IONOS Bearer token (JWT from the IONOS DCD Token Manager)
 #       optional: true
-# - name: FACIS_CUSTOM_LLM_MODEL
-#   value: "custom"
+# - name: FACIS_CUSTOM_LLM_MODEL  # case-sensitive; must exist in the IONOS catalog (GET /v1/models)
+#   value: "meta-llama/Llama-3.3-70B-Instruct"

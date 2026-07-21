@@ -21,7 +21,7 @@ Important defaults from `config/default.yaml`:
 |---|---|
 | `http.host` | `0.0.0.0` |
 | `http.port` | `8080` |
-| `llm.model` | `gpt-4.1-mini` |
+| `llm.model` | `meta-llama/Llama-3.3-70B-Instruct` |
 | `trino.catalog` | `hive` |
 | `trino.target_schema` | `gold` |
 | `policy.enabled` | `true` |

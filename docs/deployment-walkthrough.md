@@ -322,7 +322,7 @@ helm install facis-ai-insight \
   --namespace facis \
   --set llm.chatCompletionsUrl="$LLM_CHAT_COMPLETIONS_URL" \
   --set llm.apiKey="$LLM_API_KEY" \
-  --set llm.model=gpt-4.1-mini \
+  --set llm.model=meta-llama/Llama-3.3-70B-Instruct \
   --set trino.host=[TRINO_COORDINATOR_HOST] \
   --set trino.port=8443 \
   --set trino.httpScheme=https \
@@ -341,9 +341,9 @@ helm install facis-ai-insight \
 helm install facis-ai-insight \
   services/ai-insight-service/helm/facis-ai-insight/ \
   --namespace facis \
-  --set llm.chatCompletionsUrl="https://api.openai.com/v1/chat/completions" \
-  --set llm.apiKey="sk-proj-your-key" \
-  --set llm.model=gpt-4.1-mini \
+  --set llm.chatCompletionsUrl="https://openai.inference.de-txl.ionos.com/v1/chat/completions" \
+  --set llm.apiKey="$IONOS_TOKEN" \
+  --set llm.model=meta-llama/Llama-3.3-70B-Instruct \
   --set trino.host=trino-coordinator.stackable.svc.cluster.local \
   --set trino.port=8443 \
   --set trino.httpScheme=https \
@@ -409,7 +409,7 @@ kubectl get configmap facis-ai-insight-config -n facis -o jsonpath='{.data.clust
 - `trino.host: [TRINO_COORDINATOR_HOST]`
 - `trino.port: 8443`
 - `trino.http_scheme: https`
-- `llm.model: gpt-4.1-mini`
+- `llm.model: meta-llama/Llama-3.3-70B-Instruct`
 - `policy.enabled: true`
 - `rate_limit.requests_per_minute: 10`
 
@@ -1037,7 +1037,7 @@ trino:
 | `AI_INSIGHT_HTTP__PORT` | `8080` | int | HTTP listen port |
 | `AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL` | — | str | **Required**; stored in Secret |
 | `AI_INSIGHT_LLM__API_KEY` | — | str | **Required**; stored in Secret |
-| `AI_INSIGHT_LLM__MODEL` | `gpt-4.1-mini` | str | Model identifier sent to LLM |
+| `AI_INSIGHT_LLM__MODEL` | `meta-llama/Llama-3.3-70B-Instruct` | str | Model identifier sent to LLM |
 | `AI_INSIGHT_LLM__TIMEOUT_SECONDS` | `30` | int | Request timeout |
 | `AI_INSIGHT_LLM__REQUIRE_HTTPS` | `true` | bool | Enforce HTTPS on completions URL |
 | `AI_INSIGHT_TRINO__HOST` | `trino` | str | Trino coordinator hostname |
@@ -1059,7 +1059,7 @@ import os
 seed = int(os.getenv("SIMULATOR_SIMULATION__SEED", "12345"))
 
 # Example: read LLM model
-model = os.getenv("AI_INSIGHT_LLM__MODEL", "gpt-4.1-mini")
+model = os.getenv("AI_INSIGHT_LLM__MODEL", "meta-llama/Llama-3.3-70B-Instruct")
 ```
 
 ### Appendix C: Troubleshooting Common Issues

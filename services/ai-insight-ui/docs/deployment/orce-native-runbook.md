@@ -191,7 +191,7 @@ Stored in `Secret/facis-ai-insight-secrets` (mounted via `envFrom`):
 | Key                                     | Purpose                                         |
 |-----------------------------------------|-------------------------------------------------|
 | `AI_INSIGHT_LLM__API_KEY`               | OpenAI API key (use a project-scoped key)       |
-| `AI_INSIGHT_LLM__MODEL`                 | `gpt-4.1-mini` (or alternate)                   |
+| `AI_INSIGHT_LLM__MODEL`                 | `meta-llama/Llama-3.3-70B-Instruct` (or alternate)                   |
 | `AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL`  | `https://api.openai.com/v1/chat/completions`    |
 | `AI_INSIGHT_TRINO__HOST`                | `212.132.83.150`                                |
 | `AI_INSIGHT_TRINO__USER`                | **MUST equal the OIDC username** (else `Access Denied: cannot impersonate`). For us = `test`. |

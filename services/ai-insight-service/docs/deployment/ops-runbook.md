@@ -64,7 +64,7 @@ helm install facis-ai-insight ./facis-ai-insight -n facis --create-namespace \
   --set image.tag=0.1.0 \
   --set llm.chatCompletionsUrl=https://your-llm-endpoint/v1/chat/completions \
   --set llm.apiKey=your-api-key \
-  --set llm.model=gpt-4.1-mini \
+  --set llm.model=meta-llama/Llama-3.3-70B-Instruct \
   --set trino.host=trino-coordinator.stackable.svc.cluster.local \
   --set trino.port=8443 \
   --set trino.httpScheme=https \
@@ -81,7 +81,7 @@ helm install facis-ai-insight ./facis-ai-insight -n facis -f values-cluster.yaml
 ```bash
 # Upgrade with new values
 helm upgrade facis-ai-insight ./facis-ai-insight -n facis \
-  --set llm.model=gpt-4-turbo
+  --set llm.model=meta-llama/Llama-3.3-70B-Instruct
 
 # Rollback to previous revision
 helm rollback facis-ai-insight -n facis
@@ -123,7 +123,7 @@ image:
 llm:
   chatCompletionsUrl: "https://your-llm-endpoint/v1/chat/completions"
   apiKey: "your-api-key"
-  model: "gpt-4.1-mini"
+  model: "meta-llama/Llama-3.3-70B-Instruct"
   requireHttps: true
 
 trino:
@@ -224,7 +224,7 @@ helm install facis-ai-insight ./facis-ai-insight -n facis -f values-cluster.yaml
 |-----------|------|---------|-------------|
 | `llm.chatCompletionsUrl` | string | `""` | OpenAI-compatible chat completions endpoint (required) |
 | `llm.apiKey` | string | `""` | LLM provider API key (required) |
-| `llm.model` | string | `gpt-4.1-mini` | Model identifier |
+| `llm.model` | string | `meta-llama/Llama-3.3-70B-Instruct` | Model identifier |
 | `llm.timeoutSeconds` | int | `30` | Request timeout |
 | `llm.maxRetries` | int | `3` | Retry attempts on transient errors |
 | `llm.retryBaseDelaySecs` | float | `0.5` | Exponential backoff base delay |
@@ -540,7 +540,7 @@ kubectl logs -n facis <pod-name> --previous
 curl -X POST https://your-llm-endpoint/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4.1-mini", "messages": [{"role": "user", "content": "test"}]}'
+  -d '{"model": "meta-llama/Llama-3.3-70B-Instruct", "messages": [{"role": "user", "content": "test"}]}'
 
 # Check service logs for retry attempts
 kubectl logs -n facis -l app.kubernetes.io/name=ai-insight-service 2>&1 | grep -i "llm\|retry\|timeout"
@@ -745,7 +745,7 @@ ENVIRONMENT VARIABLES (AI_INSIGHT_ prefix, __ nesting)
   AI_INSIGHT_HTTP__PORT=8080
   AI_INSIGHT_LLM__API_KEY=your-api-key
   AI_INSIGHT_LLM__CHAT_COMPLETIONS_URL=https://...
-  AI_INSIGHT_LLM__MODEL=gpt-4.1-mini
+  AI_INSIGHT_LLM__MODEL=meta-llama/Llama-3.3-70B-Instruct
   AI_INSIGHT_TRINO__HOST=trino
   AI_INSIGHT_TRINO__PORT=8443
   AI_INSIGHT_TRINO__HTTP_SCHEME=https
