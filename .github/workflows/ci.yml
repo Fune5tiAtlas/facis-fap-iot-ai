@@ -58,11 +58,7 @@ jobs:
         run: pytest tests/integration
       
       - name: Run BDD tests
-        run: |
-          pytest tests/bdd || status=$?
-          if [ "${status:-0}" -ne 0 ] && [ "${status:-0}" -ne 5 ]; then
-            exit "${status}"
-          fi
+        run: pytest tests/bdd
       
       - name: Upload coverage
         uses: codecov/codecov-action@v6
@@ -188,13 +184,13 @@ jobs:
         working-directory: services/dsp-connector/orce/tests
         run: node --test flows/*.spec.js
 
-      - name: Simulation — install spec deps (seedrandom)
-        working-directory: services/simulation/orce
-        run: npm install --no-save --no-audit --no-fund seedrandom
+      - name: Simulation — install dev deps (seedrandom, pinned)
+        working-directory: services/simulation/orce/tests
+        run: npm ci
 
       - name: Simulation — flow specs
-        working-directory: services/simulation/orce
-        run: node --test tests/flows/*.spec.js
+        working-directory: services/simulation/orce/tests
+        run: node --test flows/*.spec.js
 
       - name: Industrial Ingestion — flow specs
         working-directory: services/industrial-ingestion-service/orce/tests
@@ -206,6 +202,10 @@ jobs:
 
       - name: SFTP Ingestion — flow specs
         working-directory: services/sftp-ingestion-service/orce/tests
+        run: node --test flows/*.spec.js
+
+      - name: AI Insight UI — flow specs
+        working-directory: services/ai-insight-ui/orce/tests
         run: node --test flows/*.spec.js
 
   test-ai-insight-orce:

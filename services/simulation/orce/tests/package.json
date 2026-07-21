@@ -1,0 +1,12 @@
+{
+  "name": "facis-simulation-orce-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Parity specs for the simulation ORCE flows (node:test). Declares seedrandom so the suite is reproducible and CI-pinned (NF-13).",
+  "scripts": {
+    "test": "node --test flows/*.spec.js"
+  },
+  "devDependencies": {
+    "seedrandom": "3.0.5"
+  }
+}
