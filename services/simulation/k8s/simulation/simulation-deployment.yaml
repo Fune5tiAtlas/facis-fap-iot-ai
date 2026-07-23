@@ -1,5 +1,14 @@
 # ──────────────────────────────────────────────────────────────────────
-# FACIS Simulation Service — Kubernetes Deployment
+# DEPRECATED / DO NOT APPLY (C-3, audit 2026-07-23).
+# This standalone Python simulation Deployment is SUPERSEDED by the
+# ORCE-native simulation (rendered feeds on the shared `orce` pod), which is
+# the authoritative runtime. Its image (facis/simulation:1.0.0) was removed
+# from the registry by the ORCE migration, so applying this manifest yields an
+# ImagePullBackOff. Kept only for historical reference; do not deploy. The live
+# orphan was scaled to 0 on 2026-07-23. Remove this file once no environment
+# references it.
+# ──────────────────────────────────────────────────────────────────────
+# FACIS Simulation Service — Kubernetes Deployment (LEGACY, see banner above)
 #
 # Deterministic IoT simulator that sends tick envelopes to ORCE
 # (which then forwards to Kafka via rdkafka with mTLS).
