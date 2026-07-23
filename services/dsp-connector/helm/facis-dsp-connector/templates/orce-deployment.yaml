@@ -2,8 +2,10 @@
 # Dedicated ORCE (Node-RED) runtime for the DSP connector (FAP role
 # separation — see docs/architecture/fap-role-mapping.md). Runs this chart's
 # flow set on its own pod, isolated from the simulation/SFTP/AI-UI flows on
-# the shared ORCE pod. Single replica: DSP state is file-based (not
-# multi-replica safe) and the runtime PVC is RWO.
+# the shared ORCE pod. Single replica: DSP negotiation/transfer state is
+# PostgreSQL-backed (facis-dsp-state.json + postgres-statefulset.yaml),
+# transactional and durable across pod loss; the single replica is deviation
+# D-2 (not the storage model) and the runtime PVC is RWO.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -4,6 +4,6 @@
   "private": true,
   "description": "Parity specs for the industrial ingestion ORCE flows (node:test, no Node-RED runtime).",
   "scripts": {
-    "test": "node --test flows"
+    "test": "node --test flows/*.spec.js"
   }
 }

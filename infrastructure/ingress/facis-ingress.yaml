@@ -149,6 +149,16 @@ spec:
                 name: facis-dsp-connector-orce
                 port:
                   number: 1880
+          # DSP 2025-1 version discovery (M-2, audit 2026-07-23): served by
+          # facis-dsp-health.json; must be reachable at the edge for the DSP
+          # TCK version probe. DSP connector runs on its dedicated ORCE instance.
+          - path: /.well-known/dspace-version
+            pathType: Exact
+            backend:
+              service:
+                name: facis-dsp-connector-orce
+                port:
+                  number: 1880
           # OID4VCI issuer discovery: static issuer metadata (credential
           # endpoint + supported credential types) for this connector's own
           # Participant VC issuance surface — served by

@@ -4,6 +4,6 @@
   "private": true,
   "description": "Flow-JSON guard tests for the AI Insight UI ORCE flows (node:test).",
   "scripts": {
-    "test": "node --test flows"
+    "test": "node --test flows/*.spec.js"
   }
 }

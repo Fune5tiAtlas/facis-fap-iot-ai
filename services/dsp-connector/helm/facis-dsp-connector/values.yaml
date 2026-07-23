@@ -129,12 +129,14 @@ dsp:
     #    facis-dsp-iam-verify.json.
     #    NOTE even in "enforce": any problem actually fetching/verifying
     #    the status list itself (unreachable, malformed, bad signature)
-    #    fails OPEN, not closed — a revoked credential could pass during
-    #    a status-list outage. This is a deliberate availability-over-
-    #    strictness tradeoff for a control whose absence just returns to
-    #    pre-revocation-checking behaviour; it does not touch VP/VC
-    #    signature verification, which is unaffected and still enforced.
-    statusListMode: "warn"
+    #    (mode "warn") fails OPEN, not closed. The acceptance profile sets
+    #    "enforce" (M-3, audit 2026-07-23): a revoked credential is REJECTED,
+    #    and a status-list outage fails CLOSED (verification is refused rather
+    #    than admitting a possibly-revoked credential). This is a deliberate
+    #    strictness-over-availability tradeoff; it does not change VP/VC
+    #    signature verification, which is enforced in both modes. Set back to
+    #    "warn" only with a signed risk acceptance of unchecked revocation.
+    statusListMode: "enforce"
     # -- RESERVED (not yet implemented): local (jose in-flow, default) |
     #    remote (external walt.id verifier). No flow reads this value
     #    today; setting it to "remote" does NOT enable a remote verifier.

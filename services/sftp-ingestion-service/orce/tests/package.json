@@ -4,7 +4,7 @@
   "private": true,
   "description": "Flow-level tests for the FACIS SFTP Ingestion ORCE flows.",
   "scripts": {
-    "test": "node --test flows"
+    "test": "node --test flows/*.spec.js"
   },
   "devDependencies": {
     "csv-parse": "^5.5.0"
