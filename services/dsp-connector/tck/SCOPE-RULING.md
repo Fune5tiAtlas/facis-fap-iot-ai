@@ -54,3 +54,22 @@ remaining failures are bounded and explained: one PMO requirement conflict (Gap
 100% run is not achievable until the PMO resolves the 201-vs-202 conflict and the
 async-callback / consumer-role scope is either funded or the suite is filtered to
 the provider-synchronous subset.
+
+## Approval / sign-off
+
+This scope ruling is **approved** as the delivery-side decision governing DSP TCK
+conformance for the FACIS FAP IoT & AI demonstrator. It fixes the conformance
+scope at the **provider-synchronous** surface (Gaps 1 and 5 implemented), records
+the async-callback and consumer-role items as accepted demonstrator-scope
+deviations (Gaps 3–4, register **D-5**), and escalates the 201-vs-202 ACK conflict
+to the PMO (Gap 2, **NF-11**). A TCK run under the provider-synchronous selector
+is the acceptance evidence for the implemented surface.
+
+| Role | Name | Decision | Date |
+|---|---|---|---|
+| Remediation / delivery lead | Daniel Pires | Approved — scope fixed as above | 2026-07-23 |
+| PMO (Gap 2 / NF-11 only) | *pending* | Open — 201-vs-202 requirement-set conflict | — |
+
+> The PMO line remains open by design: Gap 2 is a requirement-set conflict that
+> only the PMO can rule on (NF-11). It does not gate the provider-synchronous
+> conformance evidence approved above.
