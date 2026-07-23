@@ -213,7 +213,11 @@ dsp:
 dspStatePvc:
   enabled: true
   name: facis-dsp-state
-  size: 256Mi
+  # 1Gi minimum: the IONOS CSI provisioner (cloud.ionos.com) rejects volumes
+  # below 1073741824 bytes ("OutOfRange … must be between 1GiB and 4TiB"), so a
+  # clean helm install fails on the target cluster with a smaller request
+  # (NF-10, audit 2026-07-23). The DSP state footprint is tiny either way.
+  size: 1Gi
   storageClassName: ""
   accessModes:
     - ReadWriteOnce
