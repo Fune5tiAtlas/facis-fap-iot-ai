@@ -162,8 +162,16 @@ dsp:
       #    the in-cluster StatefulSet's DNS name if left blank).
       uriSecret: ""
     # -- Name of a pre-created Secret holding this connector's private JWK
-    #    under key `privateJwk` (never generated on the pod for prod).
+    #    under key `privateJwk` (the prod path — never generated on the pod).
     keySecret: "facis-dsp-connector-identity-key"
+    # -- Inline private JWK (NF-10, audit 2026-07-23). When set, the chart
+    #    renders the identity-key Secret itself (`<fullname>-identity-key`) and
+    #    the deployment uses it, so a clean `helm install` is self-contained and
+    #    does not require pre-creating `keySecret` out of band (which otherwise
+    #    fails a fresh install with CreateContainerConfigError). Leave empty to
+    #    use the pre-created `keySecret` above (prod). Provide as a single-line
+    #    JWK JSON string, e.g. --set-file dsp.iam.privateJwk=identity.jwk.
+    privateJwk: ""
   # -- Trino connection used by facis-dsp-data.json's data-serving query.
   #    Same physical Trino coordinator + demo credentials already used by
   #    infrastructure/lakehouse/setup_nifi.py (same trino-users Secret).

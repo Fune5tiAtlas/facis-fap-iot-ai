@@ -316,7 +316,10 @@ spec:
             - name: DSP_CONNECTOR_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.dsp.iam.keySecret }}
+                  # Chart-rendered identity-key Secret when dsp.iam.privateJwk is
+                  # set (self-contained clean install, NF-10); else the
+                  # pre-created keySecret (prod path).
+                  name: {{ if .Values.dsp.iam.privateJwk }}{{ include "facis-dsp-connector.fullname" . }}-identity-key{{ else }}{{ .Values.dsp.iam.keySecret }}{{ end }}
                   key: privateJwk
           envFrom:
             - secretRef:

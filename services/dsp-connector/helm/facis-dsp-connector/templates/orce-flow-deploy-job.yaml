@@ -62,10 +62,13 @@ spec:
               # init-deps container compiles librdkafka), so a fixed sleep is
               # not enough. 200 = reachable/open, 401 = reachable but auth-gated
               # — either means the HTTP server is serving; keep waiting on
-              # connection errors (000) or 5xx. Up to 60 tries × 5s = 5 minutes.
+              # connection errors (000) or 5xx. Up to 90 tries × 5s = 7.5 minutes
+              # (NF-10, audit 2026-07-23: a first-install cold start — init-deps
+              # compiling librdkafka on slow nodes — can exceed the old 5-min cap,
+              # timing out the post-install hook and leaving flows undeployed).
               echo "[orce-flow-deploy] polling ${ORCE_ADMIN_URL}/flows for readiness..."
               i=0
-              while [ "$i" -lt 60 ]; do
+              while [ "$i" -lt 90 ]; do
                 CODE=$(curl -s -o /dev/null -w '%{http_code}' \
                   -H "Authorization: Bearer ${ORCE_ADMIN_TOKEN}" \
                   -H "Node-RED-API-Version: v2" \
@@ -75,7 +78,7 @@ spec:
                   break
                 fi
                 i=$((i + 1))
-                echo "[orce-flow-deploy] not ready (http $CODE), retry $i/60"
+                echo "[orce-flow-deploy] not ready (http $CODE), retry $i/90"
                 sleep 5
               done
 
