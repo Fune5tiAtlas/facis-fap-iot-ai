@@ -116,7 +116,7 @@ dsp:
     didCacheTtlSeconds: 300
     # -- open (default) | verified. Catalogues are commonly public; set to
     #    "verified" only if this deployment's catalogue must be gated too.
-    catalogueMode: "open"
+    catalogueMode: "verified"  # M-1 (audit 2026-07-23): catalogue requires a valid VP; anonymous browsing disabled
     # -- This connector's own did:web identity (issued Participant VC subject).
     connectorDid: "did:web:fap-iotai.facis.cloud"
     # -- off | warn | enforce. Gates BitstringStatusList revocation
