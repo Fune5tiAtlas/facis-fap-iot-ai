@@ -54,3 +54,26 @@ conflict (gap 2 / NF-11) and two accepted demonstrator-scope deviations (gaps
 3–4 / deviation D-5). A 100% run is not achievable until the PMO resolves the
 201-vs-202 conflict and the async-callback / consumer-role scope is funded or the
 suite is filtered to the provider-synchronous subset.
+
+## Running the TCK with fixtures (NF-7, provider-synchronous subset)
+
+A raw TCK run against the FACIS connector scores low because the connector's
+catalogue exposes real lakehouse datasets, not the TCK's expected fixture ids
+(`Catalog01Test.assertDataset` wants `CAT0101`), and the transfer tests expect
+pre-seeded agreements. To demonstrate the **provider-synchronous** subset:
+
+1. **Catalogue fixtures** — deploy the connector with `tck-datasets.json` as its
+   datasets overlay (mount it as the `…-orce-config` datasets source, or append
+   it to `orce/config/datasets.json` on a dedicated TCK instance only — never in
+   prod). It maps `CAT0101/0102/0103` to real gold tables so the catalogue
+   derive flow serves them.
+2. **Transfer fixtures** — seed the negotiation state with FINALIZED agreements
+   `ATP0101, ATP0102, ATP0103, ATP0201, ATP0202, ATP0301` (format
+   `HttpData-PULL`, per `tck.properties`), and ensure the transfer initiate
+   endpoint `POST /tck/transfers/requests` is reachable.
+3. Run on a **dedicated `IAM=off` instance** (see the audit's `dsp-tck`
+   scratch-namespace procedure) so the TCK's unauthenticated requests are not
+   rejected by enforce mode. Then `./run-tck.sh` and read `evidence/`.
+
+The consumer-role (`TP_C`) and asynchronous-callback tests remain expected
+failures — accepted demonstrator-scope deviations **D-5** (see SCOPE-RULING.md).
