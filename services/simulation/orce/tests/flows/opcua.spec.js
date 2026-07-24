@@ -157,3 +157,68 @@ test('opcua flow: initial registration waits out server boot', () => {
     const inj = readFlow().find((n) => n.id === 'inject-opcua-init');
     assert.ok(Number(inj.onceDelay) >= 15);
 });
+
+test('opcua flow: addVariable registrations are paced through a no-drop rate limit', () => {
+    // Firing all 13 addVariable messages in one synchronous burst let the
+    // server drop a registration ("Variable not found ... current_l3_a").
+    // The init must route through a rate-limit delay that does NOT drop.
+    const flow = readFlow();
+    const init = flow.find((n) => n.id === 'fn-opcua-init');
+    const pace = flow.find((n) => n.id === init.wires[0][0]);
+    assert.equal(pace.type, 'delay', 'init must feed a delay node');
+    assert.equal(pace.pauseType, 'rate');
+    assert.equal(pace.drop, false, 'pacing delay must not drop registrations');
+    assert.deepEqual(pace.wires[0], ['opcua-server-config']);
+});
+
+test('opcua flow: server output feeds a confirmed-registration tracker', () => {
+    // The server emits one { messageType:'Variable', nodeId } confirmation
+    // per successful addVariable. The tracker records each confirmed metric
+    // into the `opcua_registered` global — ground truth, not a guessed timer.
+    const flow = readFlow();
+    const server = flow.find((n) => n.type === 'OpcUa-Server');
+    assert.deepEqual(server.wires[0], ['fn-opcua-track'], 'server output must feed the tracker');
+    const track = flow.find((n) => n.id === 'fn-opcua-track');
+    assert.ok(track && track.type === 'function', 'fn-opcua-track missing');
+    assert.match(track.func, /messageType !== 'Variable' \|\| !p\.nodeId/,
+        'tracker must accept only addVariable confirmations');
+    assert.match(track.func, /Array\.isArray\(p\)/, 'tracker must ignore value-update batch echoes');
+    assert.match(track.func, /global\.set\('opcua_registered'/);
+});
+
+test('opcua flow: init re-registers only variables not already confirmed', () => {
+    // Re-adding an existing NodeId throws "already registered" in
+    // node-opcua, so the catch-driven retry must add only the missing set.
+    const flow = readFlow();
+    const init = flow.find((n) => n.id === 'fn-opcua-init');
+    assert.match(init.func, /global\.get\('opcua_registered'\)/);
+    assert.match(init.func, /\.filter\(\(m\) => !registered\[m\]\)/,
+        'init must register only metrics missing from the confirmed set');
+});
+
+test('opcua flow: writer is gated on the full confirmed-registration set', () => {
+    // The writer must not publish until all 13 variables are confirmed
+    // present in the address space — otherwise a redeploy (which rebuilds
+    // the server empty) writes to non-existent nodes ("Variable not found").
+    const flow = readFlow();
+    const writer = flow.find((n) => n.id === 'fn-opcua-writer');
+    assert.match(writer.func, /global\.get\('opcua_registered'\)/);
+    assert.match(writer.func, /Object\.keys\(registered\)\.length < METRICS_TOTAL/,
+        'writer gates on the count of confirmed registrations');
+    assert.doesNotMatch(writer.func, /opcua_registered_at/,
+        'the guessed time-based gate must be gone');
+});
+
+test('opcua flow: a start-time reset clears stale registration state', () => {
+    // Global context survives a redeploy but the server address space does
+    // not; the reset drops stale confirmations so the writer stays quiet
+    // until the fresh registration re-confirms every variable.
+    const flow = readFlow();
+    const inj = flow.find((n) => n.id === 'inject-opcua-reset');
+    assert.ok(inj, 'inject-opcua-reset missing');
+    assert.equal(inj.once, true);
+    assert.equal(Number(inj.onceDelay), 0, 'reset must fire immediately on deploy');
+    assert.deepEqual(inj.wires[0], ['fn-opcua-reset']);
+    const reset = flow.find((n) => n.id === 'fn-opcua-reset');
+    assert.match(reset.func, /global\.set\('opcua_registered', \{\}\)/);
+});
