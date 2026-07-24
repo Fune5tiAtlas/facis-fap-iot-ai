@@ -55,6 +55,30 @@ remaining failures are bounded and explained: one PMO requirement conflict (Gap
 async-callback / consumer-role scope is either funded or the suite is filtered to
 the provider-synchronous subset.
 
+### Executed evidence (2026-07-24) — provider-synchronous subset green
+
+`tck/evidence/tck-run-20260724T124437Z.log` (isolated IAM-off instance,
+`tck-datasets.json` overlay live) records the provider-synchronous subset passing
+**4/4**: `MET:01-01`, `CAT:01-01`, `CAT:01-02`, `CAT:01-03` all **SUCCESSFUL**.
+Two connector-side conformance fixes closed the earlier `CAT:01-02/03` failures:
+
+- **`CAT:01-02` (dataset request):** the single-dataset endpoint `dsp-cat-dataset-fn`
+  (`orce/flows/facis-dsp-catalogue.json`) now emits a proper `dcat:Dataset` JSON-LD
+  (`@context`/`@type`/`@id`/`dct:title`/`dcat:distribution`/`odrl:hasPolicy`) rather
+  than the raw internal `{id, metadata, offers}` object — resolving the TCK's
+  JSON-LD-navigation NPE. Unit-guarded by `orce/tests/flows/dsp-dataset-dcat.spec.js`.
+- **`CAT:01-03` (dataset request *not found*):** `CAT_01_03_DATASETID=CAT0103` is the
+  negative probe — the fixture set deliberately **omits** CAT0103 (seeds only
+  CAT0101/CAT0102) so the connector returns a 404 `CatalogError`.
+
+The other 55 tests are exhaustively `ContractNegotiation*` / `TransferProcess*`
+async-callback FSM and consumer-role cases (Gaps 3–4). They require the CUT to POST
+DSP state callbacks to `callback.address`, which is unreachable from the in-cluster
+connector reached via inbound port-forward; TCK 1.0.1 has no synchronous TP subset.
+FINALIZED-agreement seeding (`tck/tck-agreements-seed.sql`) is delivered as the
+necessary state groundwork but cannot be TCK-verified without a callback bridge —
+so those remain accepted deviation **D-5**, unchanged.
+
 ## Approval / sign-off
 
 This scope ruling is **approved** as the delivery-side decision governing DSP TCK
@@ -62,8 +86,9 @@ conformance for the FACIS FAP IoT & AI demonstrator. It fixes the conformance
 scope at the **provider-synchronous** surface (Gaps 1 and 5 implemented), records
 the async-callback and consumer-role items as accepted demonstrator-scope
 deviations (Gaps 3–4, register **D-5**), and escalates the 201-vs-202 ACK conflict
-to the PMO (Gap 2, **NF-11**). A TCK run under the provider-synchronous selector
-is the acceptance evidence for the implemented surface.
+to the PMO (Gap 2, **NF-11**). The executed provider-synchronous run above
+(`tck-run-20260724T124437Z.log`, 4/4) is the acceptance evidence for the
+implemented surface.
 
 | Role | Name | Decision | Date |
 |---|---|---|---|

@@ -30,21 +30,5 @@
     "offers": [
       { "id": "offer:tck:CAT0102:read", "policySummary": { "purpose": "conformance", "rate_limit": "60 req/min", "ttl": "PT1H" } }
     ]
-  },
-  {
-    "id": "CAT0103",
-    "metadata": {
-      "title": "TCK fixture — City Dashboard Summary",
-      "description": "DSP TCK Catalog01/Metadata fixture dataset (CAT_01_03_DATASETID). Backed by gold.city_dashboard_summary.",
-      "assetType": "smartcity.summary",
-      "format": "iceberg/parquet",
-      "temporalResolution": "PT1H",
-      "schema": "gold",
-      "table": "city_dashboard_summary",
-      "timeColumn": "hour"
-    },
-    "offers": [
-      { "id": "offer:tck:CAT0103:read", "policySummary": { "purpose": "conformance", "rate_limit": "60 req/min", "ttl": "PT1H" } }
-    ]
   }
 ]
