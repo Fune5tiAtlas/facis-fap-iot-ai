@@ -35,9 +35,22 @@ Tests: `cd orce && npm run test:flows`.
 - [REST API reference](docs/api/rest-api.md)
 - [Verified-token authorization](docs/api/verified-token-authz.md)
 
-Deployment: the ORCE runtime is built from [`orce/`](orce/) (its own
-Dockerfile bundles the flows onto the `xfsc-orce` base). The former Python-app
-deployment (`helm/facis-ai-insight`, `k8s/`) has been removed.
+Deployment: the AI Insight backend runs **ORCE-native**. As of 2026-07-24 its
+flows are **consolidated onto the shared `orce` runtime** (namespace `orce`)
+instead of a separate `ai-insight-service:8080` deployment: the 7 flow tabs in
+[`orce/flows/`](orce/flows/) plus their subflows are merged into the shared
+runtime's flow set, and the AI Insight UI proxy reaches them over loopback
+(`AI_INSIGHT_BASE_URL=http://127.0.0.1:1880`, now the default in the
+`ai-insight-ui` helm values / configmap). The health tab
+(`tab_ai_insight_bootstrap`, `GET /api/v1/health`) is dropped on merge because the
+shared runtime already serves that route. The former Python-app deployment
+(`helm/facis-ai-insight`, `k8s/`) and the standalone `orce/` container image are
+no longer deployed.
+
+To (re)deploy the flows: merge `orce/flows/*.json` (excluding
+`tab_ai_insight_bootstrap`) into the shared runtime's **current** flow set and
+`POST /orce/flows` as a full deploy. Do NOT POST only these flows — a full deploy
+of a partial set wipes the other services' tabs on the shared runtime.
 
 > Note: `docs/guides/*` and `docs/deployment/*` still describe the old Python
 > deployment and are pending a documentation refresh.

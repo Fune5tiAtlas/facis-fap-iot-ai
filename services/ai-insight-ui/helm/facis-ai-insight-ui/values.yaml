@@ -109,9 +109,12 @@ llm:
 # AI Insight Backend Service
 # ---------------------------------------------------------------------------
 aiInsight:
-  # -- Cluster-internal base URL of the AI Insight backend service.
-  #    Injected into ORCE via AI_INSIGHT_BASE_URL env var.
-  serviceUrl: "http://ai-insight-service:8080"
+  # -- Base URL the UI proxy uses to reach the AI Insight backend.
+  #    Injected into ORCE via AI_INSIGHT_BASE_URL env var. The backend now runs
+  #    as flows on the SAME shared ORCE runtime (consolidated 2026-07-24), so the
+  #    proxy calls the runtime's own loopback. Use http://ai-insight-service:8080
+  #    only if the backend is split back into its own :8080 service.
+  serviceUrl: "http://127.0.0.1:1880"
 
 # ---------------------------------------------------------------------------
 # Keycloak / OIDC settings

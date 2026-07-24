@@ -37,7 +37,7 @@ stringData:
 # Required additions to orce-deployment.yaml env section:
 #
 # - name: AI_INSIGHT_BASE_URL
-#   value: "http://ai-insight-service:8080"
+#   value: "http://127.0.0.1:1880"   # backend consolidated into the shared ORCE runtime (2026-07-24); use http://ai-insight-service:8080 only if split back out
 # - name: FACIS_OPENAI_API_KEY
 #   valueFrom:
 #     secretKeyRef:
