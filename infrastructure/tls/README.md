@@ -49,13 +49,22 @@ This controller fronts the `fap-iotai.facis.cloud` paths (`/orce`, `/ai`,
 traffic (Trino, Kafka mTLS) does not traverse this controller.
 
 The Superset subdomain (`fap-iotai-superset.facis.cloud`) is served by a
-**separate** Stackable load balancer and is therefore **not** covered by this
-ConfigMap. To bring the whole public surface to a TLS 1.3 minimum, the
-Stackable ingress fronting Superset must be configured separately (its own
-`ssl-protocols`/min-version setting on that load balancer). Until that is done,
-`verify-tls.sh fap-iotai-superset.facis.cloud` will show TLS 1.2 still accepted
-on that host; the FACIS application ingress above is the endpoint under this
-policy.
+**separate** Stackable `ingress-nginx` controller (which also fronts
+`identity.facis.cloud` / Keycloak and the ai-insight-ui host). It was closed
+under the same policy on 2026-07-23 (L-4, audit): its controller ConfigMap now
+carries `ssl-protocols: TLSv1.3` too —
+
+```bash
+kubectl patch configmap ingress-nginx-controller -n ingress-nginx \
+  --type merge -p '{"data":{"ssl-protocols":"TLSv1.3"}}'   # on the STACKABLE cluster
+```
+
+Verified live: Superset and Keycloak both **refuse TLS 1.2** (handshake `000`)
+and serve over TLS 1.3 (Superset `/health` → 200; Keycloak OIDC discovery →
+200, so auth is unaffected). The **whole public surface is now at a TLS 1.3
+minimum**. Same drift caveat as above: this is a live ConfigMap on a
+cluster-wide controller not in this repo's chart set — carry `ssl-protocols:
+TLSv1.3` forward on any `helm upgrade` of that controller.
 
 ## Evidence
 
