@@ -17,6 +17,7 @@ reviewable in one place rather than being rediscovered from the code.
 - [D-4 — Kafka-streaming transfers without in-band credentials or per-agreement ACLs (NF-3 / FR-DP-002 / Q-15)](#d-4--kafka-streaming-transfers-without-in-band-credentials-or-per-agreement-acls-nf-3--fr-dp-002--q-15)
 - [D-5 — DSP TCK conformance scope: asynchronous state machine and consumer-role tests (NF-7)](#d-5--dsp-tck-conformance-scope-asynchronous-state-machine-and-consumer-role-tests-nf-7)
 - [D-6 — Shared ORCE runtime updates via Recreate, not zero-downtime rolling (NF-10 / test 25)](#d-6--shared-orce-runtime-updates-via-recreate-not-zero-downtime-rolling-nf-10--test-25)
+- [D-7 — FR-AI-001 AI-retrieval p95 threshold below the Trino-Iceberg query floor (NF-9)](#d-7--fr-ai-001-ai-retrieval-p95-threshold-below-the-trino-iceberg-query-floor-nf-9)
 - [Resolved — no deviation required](#resolved--no-deviation-required)
 
 ## D-1 — Data Sink realized as a composite tier (NF-4 / Q-03)
@@ -249,6 +250,38 @@ ORCE global context to allow multi-replica rolling is the defined follow-up,
 shared with [[D-2]].
 
 **Approval status**: `Pending — demonstrator scope; rolling-update exemption for the shared ORCE tier`.
+
+
+## D-7 — FR-AI-001 AI-retrieval p95 threshold below the Trino-Iceberg query floor (NF-9)
+
+**Requirement**: NF-9 perf criterion FR-AI-001 requires AI-retrieval (1000
+records) at **p95 < 500 ms**; QA test #20 (JDBC gold read) requires **p95 < 1000 ms**.
+
+**Implementation**: Gold aggregates are materialized Iceberg tables read over
+Trino. The small-file explosion that originally blew both thresholds past 6 s
+was remediated (2026-07-24): a Trino restart with `iceberg.expire-snapshots.min-retention`
+lowered, then snapshot-expiry + orphan-removal + `OPTIMIZE` on all 21 silver+gold
+tables, plus a standing daily `lakehouse-maintenance` CronJob
+(`infrastructure/lakehouse/lakehouse-maintenance-cronjob.yaml`). Active files
+dropped from ~5000 to ~16 per table; **in-cluster gold-read p95 improved 6420 ms
+→ 799 ms**. **QA #20 (JDBC) now PASSES** (< 1000 ms). FR-AI-001 measures **~700-820 ms**.
+
+**Justification**: With files already minimal (~16) the residual latency is the
+**Trino per-query baseline** (submit → plan → schedule → execute → page-fetch →
+cleanup) for a `SELECT *` of 526 wide rows — a floor of several hundred ms that
+holds independent of data size. A **< 500 ms** p95 is therefore not reliably
+achievable for *any* Trino-Iceberg query at this demonstrator's stack/scale;
+the threshold was set below the engine's fixed overhead. The passing #20 JDBC
+result confirms the data-plane itself is healthy and query latency is bounded.
+
+**Residual risk & mitigation**: AI insights are a request/report path, not a
+real-time SLA, so ~800 ms p95 carries negligible functional risk. The daily
+maintenance CronJob keeps files (and thus latency) bounded going forward. A
+genuine sub-500 ms path would require result caching in the AI-insight-service
+or a narrower server-side projection (not `SELECT *`) — a defined perf follow-up
+(see `project_trino_oom_followup`, `project_iceberg_throughput_baseline`).
+
+**Approval status**: `Pending — PMO ruling on the FR-AI-001 < 500 ms threshold at demonstrator scale (accept ~800 ms, or fund the caching/projection follow-up)`.
 
 
 ## Resolved — no deviation required
