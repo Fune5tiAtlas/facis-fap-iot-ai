@@ -47,6 +47,9 @@ def connect() -> "trino.dbapi.Connection":
         auth=auth,
         catalog=os.environ.get("TRINO_CATALOG", "iceberg"),
         schema=os.environ.get("TRINO_SCHEMA", "gold"),
+        # TRINO_VERIFY=false skips TLS verification for self-signed cluster
+        # certs (e.g. the Stackable LB); defaults to verifying.
+        verify=os.environ.get("TRINO_VERIFY", "true").lower() != "false",
     )
 
 
