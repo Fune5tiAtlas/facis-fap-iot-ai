@@ -142,20 +142,39 @@ test('opcua flow: init registers all 13 metrics as Double variables', () => {
     }
 });
 
-test('opcua flow: registration self-heals via catch -> rate limit -> init', () => {
+test('opcua flow: registration self-heals via catch -> reconcile -> rate limit -> init', () => {
     const flow = readFlow();
     const c = flow.find((n) => n.type === 'catch' && (n.scope || []).includes('opcua-server-config'));
     assert.ok(c, 'catch node scoped to the OPC UA server');
-    const limiter = flow.find((n) => n.id === c.wires[0][0]);
+    const reconcile = flow.find((n) => n.id === c.wires[0][0]);
+    assert.equal(reconcile.id, 'fn-opcua-reconcile', 'catch must feed the reconcile node');
+    const limiter = flow.find((n) => n.id === reconcile.wires[0][0]);
     assert.equal(limiter.type, 'delay');
     assert.equal(limiter.pauseType, 'rate');
     assert.equal(limiter.drop, true);
     assert.deepEqual(limiter.wires[0], ['fn-opcua-init']);
 });
 
-test('opcua flow: initial registration waits out server boot', () => {
+test('opcua flow: reconcile clears the confirmed set when the address space is lost', () => {
+    // Without this, a stale 'opcua_registered' set survives a server
+    // restart and the heartbeat (add-missing) never re-adds anything, so
+    // the server stays empty and the client sees BadNodeIdUnknown forever.
+    const reconcile = readFlow().find((n) => n.id === 'fn-opcua-reconcile');
+    assert.ok(reconcile, 'fn-opcua-reconcile missing');
+    assert.match(reconcile.func, /not found\|not running/,
+        'reconcile must react to not-found / not-running errors');
+    assert.match(reconcile.func, /global\.set\('opcua_registered', \{\}\)/,
+        'reconcile must clear the cached confirmations on address-space loss');
+});
+
+test('opcua flow: registration runs on a self-sustaining heartbeat', () => {
+    // A one-shot inject can be skipped by a partial deploy or lost on a
+    // server restart, leaving the address space empty with nothing to
+    // retry. A repeating trigger re-registers missing variables regardless.
     const inj = readFlow().find((n) => n.id === 'inject-opcua-init');
-    assert.ok(Number(inj.onceDelay) >= 15);
+    assert.ok(inj, 'inject-opcua-init missing');
+    assert.ok(Number(inj.repeat) > 0, 'registration inject must repeat (heartbeat)');
+    assert.deepEqual(inj.wires[0], ['fn-opcua-init']);
 });
 
 test('opcua flow: addVariable registrations are paced through a no-drop rate limit', () => {

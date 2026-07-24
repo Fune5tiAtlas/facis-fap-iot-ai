@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "FACIS Simulation — OPC UA Adapter",
     "disabled": false,
-    "info": "FACIS Simulation — OPC UA Demo Server Adapter\n\nDemo fixture, not a production OPC UA server. Exposes the latest\nenergy-meter snapshot as 13 Double variables so the industrial\ningestion reference flows have a live OPC UA source to read from\n(services/industrial-ingestion-service/orce/).\n\nEndpoint: opc.tcp://<pod>:4840, SecurityPolicy None, anonymous,\nread-only. NodeIds: ns=1;s=FACIS.EnergyMeter.<metric> with the same\nmetric names as the Modbus register map (docs/api/modbus-reference.md).\n\nRegistration is confirmation-gated: the server emits one message per\nsuccessful addVariable, tracked into the `opcua_registered` global; the\nwriter only publishes once all 13 variables are confirmed present. A\nstart-time reset clears that set so a redeploy can't write against the\nfreshly rebuilt (empty) address space. Values refresh every second from\nthe `latest_meters` global written by the Feeds tab."
+    "info": "FACIS Simulation — OPC UA Demo Server Adapter\n\nDemo fixture, not a production OPC UA server. Exposes the latest\nenergy-meter snapshot as 13 Double variables so the industrial\ningestion reference flows have a live OPC UA source to read from\n(services/industrial-ingestion-service/orce/).\n\nEndpoint: opc.tcp://<pod>:4840, SecurityPolicy None, anonymous,\nread-only. NodeIds: ns=1;s=FACIS.EnergyMeter.<metric> with the same\nmetric names as the Modbus register map (docs/api/modbus-reference.md).\n\nRegistration is self-sustaining and confirmation-gated:\n  - a start-time reset clears stale registration state on every deploy;\n  - a periodic heartbeat re-registers any missing variables (idempotent),\n    so registration survives partial deploys and server restarts;\n  - the server emits one confirmation per successful addVariable, tracked\n    into the `opcua_registered` global;\n  - the writer only publishes once all 13 variables are confirmed present;\n  - a catch-driven reconcile drops the cached set when the address space\n    is lost ('Variable not found' / 'Server is not running') and triggers\n    a re-register.\nEach function node reports node.status() so registration progress is\nvisible in the editor without extra debug nodes. Values refresh every\nsecond from the `latest_meters` global written by the Feeds tab."
   },
   {
     "id": "comment-opcua",
@@ -89,7 +89,7 @@
     "type": "function",
     "z": "tab-opcua",
     "name": "reset registration set",
-    "func": "// Clear the confirmed-registration set on every (re)deploy / restart.\n// The server rebuilds its address space from scratch when this flow\n// deploys, so any surviving 'opcua_registered' entries are stale and\n// must not fool the writer into publishing against an empty server.\nglobal.set('opcua_registered', {});\nreturn null;\n",
+    "func": "// Clear the confirmed-registration set on every (re)deploy so a redeploy\n// can't leave stale entries that fool the writer or suppress the\n// re-register heartbeat.\nglobal.set('opcua_registered', {});\nnode.status({ fill: 'grey', shape: 'ring', text: 'registration reset' });\nreturn null;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -106,20 +106,20 @@
     "id": "inject-opcua-init",
     "type": "inject",
     "z": "tab-opcua",
-    "name": "register variables (15s boot grace)",
+    "name": "register heartbeat (first @5s, every 10s)",
     "props": [
       {
         "p": "payload"
       }
     ],
-    "repeat": "",
+    "repeat": "10",
     "crontab": "",
     "once": true,
-    "onceDelay": 15,
+    "onceDelay": "5",
     "topic": "",
     "payload": "",
     "payloadType": "str",
-    "x": 190,
+    "x": 200,
     "y": 140,
     "wires": [
       [
@@ -132,14 +132,14 @@
     "type": "function",
     "z": "tab-opcua",
     "name": "register address space",
-    "func": "// Register the demo energy-meter address space (13 Double variables).\n// Idempotent: only (re)adds variables not already confirmed in the\n// 'opcua_registered' set. Re-adding an existing NodeId throws\n// 'already registered' in node-opcua, so registering only the missing\n// set keeps the catch-driven retry safe. The addVariable messages are\n// paced by the downstream delay (rate-limit, no-drop) so a boot burst\n// can't overrun the server.\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\nconst registered = global.get('opcua_registered') || {};\nconst missing = METRICS.filter((m) => !registered[m]);\nif (missing.length === 0) {\n    return null;\n}\nconst msgs = missing.map((m) => ({\n    payload: { opcuaCommand: 'addVariable' },\n    topic: 'ns=1;s=FACIS.EnergyMeter.' + m + ';datatype=Double;value=0'\n}));\nnode.send([msgs]);\nreturn null;\n",
+    "func": "// Register the demo energy-meter address space (13 Double variables).\n// Runs on start, on a periodic heartbeat, and on catch-driven reconcile,\n// so registration self-sustains regardless of how the flow was deployed\n// or restarted (a one-shot inject can be skipped by a partial deploy).\n// Idempotent: only (re)adds variables not already confirmed — re-adding\n// an existing NodeId throws 'already registered' in node-opcua. The\n// addVariable messages are paced by the downstream no-drop delay so a\n// boot burst can't overrun the server.\nconst METRICS = [\n    'active_power_l1_w', 'active_power_l2_w', 'active_power_l3_w',\n    'active_power_total_w',\n    'voltage_l1_v', 'voltage_l2_v', 'voltage_l3_v',\n    'current_l1_a', 'current_l2_a', 'current_l3_a',\n    'power_factor', 'total_energy_kwh', 'frequency_hz'\n];\nconst registered = global.get('opcua_registered') || {};\nconst have = Object.keys(registered).length;\nnode.status({\n    fill: have >= METRICS.length ? 'green' : 'yellow',\n    shape: 'dot',\n    text: 'registered ' + have + '/' + METRICS.length\n});\nconst missing = METRICS.filter((m) => !registered[m]);\nif (missing.length === 0) {\n    return null;\n}\nconst msgs = missing.map((m) => ({\n    payload: { opcuaCommand: 'addVariable' },\n    topic: 'ns=1;s=FACIS.EnergyMeter.' + m + ';datatype=Double;value=0'\n}));\nnode.send([msgs]);\nreturn null;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 440,
+    "x": 470,
     "y": 140,
     "wires": [
       [
@@ -164,7 +164,7 @@
     "drop": false,
     "allowrate": false,
     "outputs": 1,
-    "x": 650,
+    "x": 700,
     "y": 140,
     "wires": [
       [
@@ -189,7 +189,7 @@
     "payload": "",
     "payloadType": "str",
     "x": 160,
-    "y": 240,
+    "y": 220,
     "wires": [
       [
         "fn-opcua-writer"
@@ -201,7 +201,7 @@
     "type": "function",
     "z": "tab-opcua",
     "name": "build variable updates",
-    "func": "// Push the latest meter snapshot into the OPC UA server address space.\n// Gate on ground truth: only write once all 13 variables are confirmed\n// registered ('opcua_registered', filled by the server's addVariable\n// confirmations). Avoids 'Variable not found' / 'Server is not running'\n// during boot or right after a redeploy.\nconst METRICS_TOTAL = 13;\nconst registered = global.get('opcua_registered') || {};\nif (Object.keys(registered).length < METRICS_TOTAL) {\n    return null;\n}\n\nconst meters = global.get('latest_meters') || [];\nif (meters.length === 0) {\n    return null;\n}\n\nconst meterIndex = Number(env.get('METER_INDEX') || 0);\nconst meter = meters[meterIndex] || meters[0];\nif (!meter || !meter.readings) {\n    return null;\n}\n\nconst r = meter.readings;\nconst phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];\nconst allPhasesPresent = phases.every((v) => typeof v === 'number' && Number.isFinite(v));\nconst totalActiveW = allPhasesPresent ? phases.reduce((a, b) => a + b, 0) : undefined;\n\nconst values = {\n    active_power_l1_w: r.active_power_l1_w,\n    active_power_l2_w: r.active_power_l2_w,\n    active_power_l3_w: r.active_power_l3_w,\n    active_power_total_w: totalActiveW,\n    voltage_l1_v: r.voltage_l1_v,\n    voltage_l2_v: r.voltage_l2_v,\n    voltage_l3_v: r.voltage_l3_v,\n    current_l1_a: r.current_l1_a,\n    current_l2_a: r.current_l2_a,\n    current_l3_a: r.current_l3_a,\n    power_factor: r.power_factor,\n    total_energy_kwh: r.total_energy_kwh,\n    frequency_hz: r.frequency_hz\n};\n\nconst updates = [];\nfor (const [name, value] of Object.entries(values)) {\n    if (typeof value !== 'number' || !Number.isFinite(value)) continue;\n    updates.push({\n        messageType: 'Variable',\n        namespace: 1,\n        variableName: 'FACIS.EnergyMeter.' + name,\n        variableValue: value,\n        sourceTimestamp: meter.timestamp\n    });\n}\nif (updates.length === 0) {\n    return null;\n}\n\nglobal.set('opcua_last_update_count', updates.length);\nglobal.set('opcua_last_update_meter', meter.meter_id);\n\nreturn { payload: updates };\n",
+    "func": "// Push the latest meter snapshot into the OPC UA server address space.\n// Gate on ground truth: only write once all 13 variables are confirmed\n// registered ('opcua_registered', filled by the server's addVariable\n// confirmations). Avoids 'Variable not found' / 'Server is not running'\n// during boot or right after a redeploy. If a redeploy left a stale full\n// set, the first write fails 'not found' and the catch reconcile clears\n// it, which re-gates the writer until re-registration completes.\nconst METRICS_TOTAL = 13;\nconst registered = global.get('opcua_registered') || {};\nif (Object.keys(registered).length < METRICS_TOTAL) {\n    node.status({ fill: 'grey', shape: 'ring', text: 'waiting registration' });\n    return null;\n}\n\nconst meters = global.get('latest_meters') || [];\nif (meters.length === 0) {\n    node.status({ fill: 'yellow', shape: 'ring', text: 'no meter data yet' });\n    return null;\n}\n\nconst meterIndex = Number(env.get('METER_INDEX') || 0);\nconst meter = meters[meterIndex] || meters[0];\nif (!meter || !meter.readings) {\n    return null;\n}\n\nconst r = meter.readings;\nconst phases = [r.active_power_l1_w, r.active_power_l2_w, r.active_power_l3_w];\nconst allPhasesPresent = phases.every((v) => typeof v === 'number' && Number.isFinite(v));\nconst totalActiveW = allPhasesPresent ? phases.reduce((a, b) => a + b, 0) : undefined;\n\nconst values = {\n    active_power_l1_w: r.active_power_l1_w,\n    active_power_l2_w: r.active_power_l2_w,\n    active_power_l3_w: r.active_power_l3_w,\n    active_power_total_w: totalActiveW,\n    voltage_l1_v: r.voltage_l1_v,\n    voltage_l2_v: r.voltage_l2_v,\n    voltage_l3_v: r.voltage_l3_v,\n    current_l1_a: r.current_l1_a,\n    current_l2_a: r.current_l2_a,\n    current_l3_a: r.current_l3_a,\n    power_factor: r.power_factor,\n    total_energy_kwh: r.total_energy_kwh,\n    frequency_hz: r.frequency_hz\n};\n\nconst updates = [];\nfor (const [name, value] of Object.entries(values)) {\n    if (typeof value !== 'number' || !Number.isFinite(value)) continue;\n    updates.push({\n        messageType: 'Variable',\n        namespace: 1,\n        variableName: 'FACIS.EnergyMeter.' + name,\n        variableValue: value,\n        sourceTimestamp: meter.timestamp\n    });\n}\nif (updates.length === 0) {\n    return null;\n}\n\nglobal.set('opcua_last_update_count', updates.length);\nglobal.set('opcua_last_update_meter', meter.meter_id);\nnode.status({ fill: 'green', shape: 'dot', text: 'writing ' + updates.length + ' @ ' + meter.meter_id });\n\nreturn { payload: updates };\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -209,7 +209,7 @@
     "finalize": "",
     "libs": [],
     "x": 440,
-    "y": 240,
+    "y": 220,
     "wires": [
       [
         "opcua-server-config"
@@ -221,7 +221,7 @@
     "type": "function",
     "z": "tab-opcua",
     "name": "track confirmed registrations",
-    "func": "// Ground-truth registration tracker. The OPC UA server emits one\n// confirmation per successful addVariable:\n//   { payload: { messageType: 'Variable',\n//                variableName: '1:FACIS.EnergyMeter.<metric>',\n//                nodeId: 'ns=1;s=FACIS.EnergyMeter.<metric>' } }\n// Record each confirmed metric so the writer only publishes once the\n// address space actually holds the variables. Ignore the server's echo\n// of value-update batches (payload is an array) and command echoes.\nconst p = msg.payload;\nif (!p || Array.isArray(p) || p.messageType !== 'Variable' || !p.nodeId) {\n    return null;\n}\nconst marker = 'FACIS.EnergyMeter.';\nconst vn = String(p.variableName || '');\nconst idx = vn.indexOf(marker);\nif (idx < 0) {\n    return null;\n}\nconst metric = vn.slice(idx + marker.length);\nif (!metric) {\n    return null;\n}\nconst registered = global.get('opcua_registered') || {};\nregistered[metric] = true;\nglobal.set('opcua_registered', registered);\nreturn null;\n",
+    "func": "// Ground-truth registration tracker. The OPC UA server emits one\n// confirmation per successful addVariable:\n//   { payload: { messageType: 'Variable',\n//                variableName: '1:FACIS.EnergyMeter.<metric>',\n//                nodeId: 'ns=1;s=FACIS.EnergyMeter.<metric>' } }\n// Record each confirmed metric so the writer only publishes once the\n// address space actually holds the variables. Ignore the server's echo\n// of value-update batches (payload is an array) and command echoes.\n// Passes the confirmation through so it is observable on a debug node.\nconst p = msg.payload;\nif (!p || Array.isArray(p) || p.messageType !== 'Variable' || !p.nodeId) {\n    return null;\n}\nconst marker = 'FACIS.EnergyMeter.';\nconst vn = String(p.variableName || '');\nconst idx = vn.indexOf(marker);\nif (idx < 0) {\n    return null;\n}\nconst metric = vn.slice(idx + marker.length);\nif (!metric) {\n    return null;\n}\nconst registered = global.get('opcua_registered') || {};\nregistered[metric] = true;\nglobal.set('opcua_registered', registered);\nconst have = Object.keys(registered).length;\nnode.status({\n    fill: have >= 13 ? 'green' : 'yellow',\n    shape: 'dot',\n    text: have + '/13 confirmed'\n});\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -247,6 +247,26 @@
     "y": 360,
     "wires": [
       [
+        "fn-opcua-reconcile"
+      ]
+    ]
+  },
+  {
+    "id": "fn-opcua-reconcile",
+    "type": "function",
+    "z": "tab-opcua",
+    "name": "reconcile on address-space loss",
+    "func": "// On a server error decide whether the address space lost our variables.\n// 'Variable not found' / 'Server is not running' both mean the writes\n// hit a server that no longer has the nodes (e.g. after a restart) — drop\n// the cached confirmations so the rate-limited re-register adds them all\n// back and the writer re-gates until it is done. Other errors just pass\n// through to a re-register attempt without clearing.\nconst err = String((msg && msg.error && msg.error.message) || (msg && msg.error) || '');\nif (/not found|not running/i.test(err)) {\n    global.set('opcua_registered', {});\n    node.status({ fill: 'red', shape: 'ring', text: 'address space lost — re-registering' });\n}\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 360,
+    "wires": [
+      [
         "delay-opcua-reregister"
       ]
     ]
@@ -268,7 +288,7 @@
     "drop": true,
     "allowrate": false,
     "outputs": 1,
-    "x": 440,
+    "x": 730,
     "y": 360,
     "wires": [
       [
