@@ -42,6 +42,9 @@ RETENTION = os.environ.get("LAKEHOUSE_RETENTION_THRESHOLD", "7d")
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env-file", default=None)
+    # resolve_credentials() reads these too (mirrors the materializer parsers).
+    ap.add_argument("--catalog", default=None)
+    ap.add_argument("--s3-bucket", default=None)
     ap.add_argument("--schemas", default="silver,gold", help="comma list of schemas to maintain")
     return ap.parse_args()
 
