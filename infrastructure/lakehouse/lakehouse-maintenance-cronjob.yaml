@@ -1,0 +1,121 @@
+# ---------------------------------------------------------------------------
+# Lakehouse maintenance CronJob — Iceberg compaction (NF-9, audit 2026-07-24)
+#
+# Runs maintain_lakehouse.py daily to OPTIMIZE (compact small data files) and
+# optimize_manifests on every silver + gold table, so the single-row-insert
+# ingest pattern (NiFi PutSQL to bronze; 10-min silver refresh) stops
+# accumulating thousands of tiny files that push Trino query p95 past the QA
+# thresholds. This is the standing remediation behind the one-off compaction
+# run in the audit; it keeps file counts bounded going forward.
+#
+# Prerequisites (same cluster secret the materializers use):
+#   1. Scripts ConfigMap (setup_lakehouse.py provides the connection + table
+#      registries that maintain_lakehouse.py imports):
+#        kubectl create configmap facis-maintenance-scripts \
+#          --from-file=maintain_lakehouse.py=infrastructure/lakehouse/maintain_lakehouse.py \
+#          --from-file=setup_lakehouse.py=infrastructure/lakehouse/setup_lakehouse.py \
+#          --from-file=materialize_silver.py=infrastructure/lakehouse/materialize_silver.py \
+#          --from-file=materialize_gold.py=infrastructure/lakehouse/materialize_gold.py \
+#          -n stackable
+#   2. Credentials secret facis-lakehouse-credentials (already created for the
+#      materializers).
+#
+# To also reclaim old files + shrink metadata history (expire_snapshots /
+# remove_orphan_files), lower the catalog's iceberg.expire-snapshots.min-retention
+# (Stackable TrinoCatalog CR, needs a Trino restart) and set
+# LAKEHOUSE_EXPIRE_SNAPSHOTS=true below.
+# ---------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: facis-lakehouse-maintenance
+  namespace: stackable
+  labels:
+    app: facis-lakehouse-maintenance
+    component: lakehouse
+spec:
+  # 03:15 daily — off-peak, after the 6-hourly gold cycle has settled.
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Compaction rewrites data files for ~21 tables; generous budget.
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: facis-lakehouse-maintenance
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          initContainers:
+          - name: install-deps
+            image: python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99
+            command: ["/bin/sh", "-c"]
+            args:
+            - pip install --target=/deps trino requests tabulate 2>&1 | tail -1
+            volumeMounts:
+            - name: deps
+              mountPath: /deps
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop: [ALL]
+          containers:
+          - name: maintenance
+            image: python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              export PYTHONPATH=/deps:/scripts
+              python /scripts/maintain_lakehouse.py --env-file /config/.env
+            env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            # Flip to "true" only after lowering the catalog min-retention.
+            - name: LAKEHOUSE_EXPIRE_SNAPSHOTS
+              value: "false"
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            volumeMounts:
+            - name: deps
+              mountPath: /deps
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: credentials
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          volumes:
+          - name: deps
+            emptyDir: {}
+          - name: tmp
+            emptyDir:
+              sizeLimit: 64Mi
+          - name: scripts
+            configMap:
+              name: facis-maintenance-scripts
+          - name: credentials
+            secret:
+              secretName: facis-lakehouse-credentials
