@@ -95,11 +95,14 @@ def build_select_sql(catalog: str, table: str, since: str | None) -> str:
     bronze = f'FROM "{catalog}".bronze.{table}\n'
     if select_sql.count(bronze) != 1:
         raise ValueError(f"silver.{table}: expected exactly one bronze source")
-    recent = f"\n      AND ingestion_timestamp > TIMESTAMP '{since}' - INTERVAL '1' DAY" if since else ""
+    recent = ""
+    if since:
+        recent = f"\n      AND ingestion_timestamp > TIMESTAMP '{since}' - INTERVAL '1' DAY"
     dedup = (
         "FROM (SELECT * FROM (\n"
         "    SELECT b.*, ROW_NUMBER() OVER (\n"
-        "        PARTITION BY kafka_topic, kafka_partition, kafka_offset ORDER BY ingestion_timestamp) AS rn\n"
+        "        PARTITION BY kafka_topic, kafka_partition, kafka_offset"
+        " ORDER BY ingestion_timestamp) AS rn\n"
         f'    FROM "{catalog}".bronze.{table} b\n'
         f"    WHERE kafka_offset IS NOT NULL{recent}\n"
         ") WHERE rn = 1)\n"
@@ -131,7 +134,8 @@ def materialize_table(
             cols = [r[0] for r in execute(
                 conn,
                 f'SELECT column_name FROM "{catalog}".information_schema.columns '
-                f"WHERE table_schema = 'silver' AND table_name = '{table}' ORDER BY ordinal_position",
+                f"WHERE table_schema = 'silver' AND table_name = '{table}' "
+                "ORDER BY ordinal_position",
             )]
             sql = (
                 f"MERGE INTO {target} t\nUSING (\n{select_sql}\n) s\n"

@@ -295,8 +295,14 @@ SELECT
     json_extract_scalar(raw_value, '$.meter_id')                     AS meter_id,
     COALESCE(json_extract_scalar(raw_value, '$.asset_id'), json_extract_scalar(raw_value, '$.meter_id')) AS asset_id,
     COALESCE(json_extract_scalar(raw_value, '$.schema_version'), '1.0') AS schema_version,
-    COALESCE(CAST(json_extract_scalar(raw_value, '$.active_power_kw') AS DOUBLE), (CAST(json_extract_scalar(raw_value, '$.readings.active_power_l1_w') AS DOUBLE) + CAST(json_extract_scalar(raw_value, '$.readings.active_power_l2_w') AS DOUBLE) + CAST(json_extract_scalar(raw_value, '$.readings.active_power_l3_w') AS DOUBLE)) / 1000.0)           AS active_power_kw,
-    COALESCE(CAST(json_extract_scalar(raw_value, '$.active_energy_kwh_total') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.readings.total_energy_kwh') AS DOUBLE))   AS active_energy_kwh_total,
+    COALESCE(CAST(json_extract_scalar(raw_value, '$.active_power_kw') AS DOUBLE),
+            (CAST(json_extract_scalar(raw_value, '$.readings.active_power_l1_w') AS DOUBLE) +
+            CAST(json_extract_scalar(raw_value, '$.readings.active_power_l2_w') AS DOUBLE) +
+            CAST(json_extract_scalar(raw_value, '$.readings.active_power_l3_w') AS DOUBLE)) /
+            1000.0) AS active_power_kw,
+    COALESCE(CAST(json_extract_scalar(raw_value, '$.active_energy_kwh_total') AS DOUBLE),
+            CAST(json_extract_scalar(raw_value, '$.readings.total_energy_kwh') AS DOUBLE)) AS
+            active_energy_kwh_total,
     CAST(json_extract_scalar(raw_value, '$.readings.active_power_l1_w') AS DOUBLE) AS active_power_l1_w,
     CAST(json_extract_scalar(raw_value, '$.readings.active_power_l2_w') AS DOUBLE) AS active_power_l2_w,
     CAST(json_extract_scalar(raw_value, '$.readings.active_power_l3_w') AS DOUBLE) AS active_power_l3_w,
@@ -329,7 +335,11 @@ SELECT
 FROM "{catalog}".bronze.energy_meter
 WHERE json_extract_scalar(raw_value, '$.timestamp') IS NOT NULL
   AND json_extract_scalar(raw_value, '$.meter_id') IS NOT NULL
-  AND COALESCE(CAST(json_extract_scalar(raw_value, '$.active_power_kw') AS DOUBLE), (CAST(json_extract_scalar(raw_value, '$.readings.active_power_l1_w') AS DOUBLE) + CAST(json_extract_scalar(raw_value, '$.readings.active_power_l2_w') AS DOUBLE) + CAST(json_extract_scalar(raw_value, '$.readings.active_power_l3_w') AS DOUBLE)) / 1000.0) >= 0
+  AND COALESCE(CAST(json_extract_scalar(raw_value, '$.active_power_kw') AS DOUBLE),
+          (CAST(json_extract_scalar(raw_value, '$.readings.active_power_l1_w') AS DOUBLE) +
+          CAST(json_extract_scalar(raw_value, '$.readings.active_power_l2_w') AS DOUBLE) +
+          CAST(json_extract_scalar(raw_value, '$.readings.active_power_l3_w') AS DOUBLE)) / 1000.0)
+          >= 0
 """
 
 # ---------------------------------------------------------------------------
@@ -342,9 +352,13 @@ SELECT
     ingestion_timestamp,
     from_iso8601_timestamp(json_extract_scalar(raw_value, '$.timestamp')) AS event_timestamp,
     json_extract_scalar(raw_value, '$.site_id')                      AS site_id,
-    COALESCE(json_extract_scalar(raw_value, '$.pv_system_id'), json_extract_scalar(raw_value, '$.system_id'))                 AS pv_system_id,
-    COALESCE(json_extract_scalar(raw_value, '$.asset_id'), COALESCE(json_extract_scalar(raw_value, '$.pv_system_id'), json_extract_scalar(raw_value, '$.system_id'))) AS asset_id,
-    COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE))              AS pv_power_kw,
+    COALESCE(json_extract_scalar(raw_value, '$.pv_system_id'), json_extract_scalar(raw_value,
+            '$.system_id')) AS pv_system_id,
+    COALESCE(json_extract_scalar(raw_value, '$.asset_id'), COALESCE(json_extract_scalar(raw_value,
+            '$.pv_system_id'), json_extract_scalar(raw_value, '$.system_id'))) AS asset_id,
+    COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE),
+            CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE)) AS
+            pv_power_kw,
     CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE) AS power_output_kw,
     CAST(json_extract_scalar(raw_value, '$.readings.daily_energy_kwh') AS DOUBLE) AS daily_energy_kwh,
     CAST(json_extract_scalar(raw_value, '$.readings.irradiance_w_m2') AS DOUBLE)  AS irradiance_w_m2,
@@ -353,7 +367,8 @@ SELECT
     -- Derived: capacity factor = output / nominal capacity (10 kWp default)
     CASE
         WHEN COALESCE(CAST(json_extract_scalar(raw_value, '$.nominal_capacity_kw') AS DOUBLE), 10.0) > 0
-        THEN COALESCE(COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE)), 0)
+        THEN COALESCE(COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE),
+                CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE)), 0)
            / COALESCE(CAST(json_extract_scalar(raw_value, '$.nominal_capacity_kw') AS DOUBLE), 10.0)
         ELSE 0
     END AS capacity_factor,
@@ -363,8 +378,10 @@ SELECT
     kafka_offset
 FROM "{catalog}".bronze.pv_generation
 WHERE json_extract_scalar(raw_value, '$.timestamp') IS NOT NULL
-  AND COALESCE(json_extract_scalar(raw_value, '$.pv_system_id'), json_extract_scalar(raw_value, '$.system_id')) IS NOT NULL
-  AND COALESCE(COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE)), 0) >= 0
+  AND COALESCE(json_extract_scalar(raw_value, '$.pv_system_id'), json_extract_scalar(raw_value,
+          '$.system_id')) IS NOT NULL
+  AND COALESCE(COALESCE(CAST(json_extract_scalar(raw_value, '$.pv_power_kw') AS DOUBLE),
+          CAST(json_extract_scalar(raw_value, '$.readings.power_output_kw') AS DOUBLE)), 0) >= 0
 """
 
 # ---------------------------------------------------------------------------
@@ -376,8 +393,12 @@ SELECT
     ingestion_timestamp,
     from_iso8601_timestamp(json_extract_scalar(raw_value, '$.timestamp')) AS event_timestamp,
     json_extract_scalar(raw_value, '$.site_id')                      AS site_id,
-    COALESCE(CAST(json_extract_scalar(raw_value, '$.temperature_c') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.conditions.temperature_c') AS DOUBLE))            AS temperature_c,
-    COALESCE(CAST(json_extract_scalar(raw_value, '$.solar_irradiance_w_m2') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.conditions.ghi_w_m2') AS DOUBLE))    AS solar_irradiance_w_m2,
+    COALESCE(CAST(json_extract_scalar(raw_value, '$.temperature_c') AS DOUBLE),
+            CAST(json_extract_scalar(raw_value, '$.conditions.temperature_c') AS DOUBLE)) AS
+            temperature_c,
+    COALESCE(CAST(json_extract_scalar(raw_value, '$.solar_irradiance_w_m2') AS DOUBLE),
+            CAST(json_extract_scalar(raw_value, '$.conditions.ghi_w_m2') AS DOUBLE)) AS
+            solar_irradiance_w_m2,
     CAST(json_extract_scalar(raw_value, '$.location.latitude') AS DOUBLE)        AS latitude,
     CAST(json_extract_scalar(raw_value, '$.location.longitude') AS DOUBLE)       AS longitude,
     CAST(json_extract_scalar(raw_value, '$.conditions.humidity_percent') AS DOUBLE) AS humidity_percent,
@@ -393,7 +414,9 @@ SELECT
     kafka_offset
 FROM "{catalog}".bronze.weather
 WHERE json_extract_scalar(raw_value, '$.timestamp') IS NOT NULL
-  AND COALESCE(CAST(json_extract_scalar(raw_value, '$.temperature_c') AS DOUBLE), CAST(json_extract_scalar(raw_value, '$.conditions.temperature_c') AS DOUBLE)) BETWEEN -50 AND 60
+  AND COALESCE(CAST(json_extract_scalar(raw_value, '$.temperature_c') AS DOUBLE),
+          CAST(json_extract_scalar(raw_value, '$.conditions.temperature_c') AS DOUBLE)) BETWEEN -50
+          AND 60
 """
 
 # ---------------------------------------------------------------------------
@@ -410,7 +433,8 @@ SELECT
     COALESCE(json_extract_scalar(raw_value, '$.schema_version'), '1.0')   AS schema_version,
     -- Derived: peak classification
     CASE
-        WHEN LOWER(json_extract_scalar(raw_value, '$.tariff_type')) IN ('morning_peak', 'evening_peak') THEN true
+        WHEN LOWER(json_extract_scalar(raw_value, '$.tariff_type')) IN ('morning_peak',
+                'evening_peak') THEN true
         ELSE false
     END AS is_peak_hour,
     message_key,
@@ -486,9 +510,14 @@ SELECT
     from_iso8601_timestamp(json_extract_scalar(raw_value, '$.timestamp')) AS event_timestamp,
     json_extract_scalar(raw_value, '$.city_id')                      AS city_id,
     json_extract_scalar(raw_value, '$.zone_id')                      AS zone_id,
-    (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) AS traffic_index,
+    (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN
+            CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE
+            CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) AS traffic_index,
     -- Derived: congestion flag
-    CASE WHEN (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) > 0.7 THEN true ELSE false END AS is_congested,
+    CASE WHEN (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN
+            CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE
+            CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) > 0.7 THEN true
+            ELSE false END AS is_congested,
     message_key,
     kafka_topic,
     kafka_partition,
@@ -496,7 +525,9 @@ SELECT
 FROM "{catalog}".bronze.traffic
 WHERE json_extract_scalar(raw_value, '$.timestamp') IS NOT NULL
   AND json_extract_scalar(raw_value, '$.zone_id') IS NOT NULL
-  AND (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) BETWEEN 0 AND 1
+  AND (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN
+          CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) / 100.0 ELSE
+          CAST(json_extract_scalar(raw_value, '$.traffic_index') AS DOUBLE) END) BETWEEN 0 AND 1
 """
 
 # ---------------------------------------------------------------------------
@@ -577,12 +608,17 @@ SELECT
     ingestion_timestamp,
     from_iso8601_timestamp(json_extract_scalar(raw_value, '$.timestamp')) AS event_timestamp,
     json_extract_scalar(raw_value, '$.city_id')                      AS city_id,
-    (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) / 100.0 ELSE CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) END)    AS fog_index,
+    (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN
+            CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) / 100.0 ELSE
+            CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) END) AS fog_index,
     COALESCE(json_extract_scalar(raw_value, '$.visibility'), 'unknown') AS visibility,
     json_extract_scalar(raw_value, '$.sunrise_time')                 AS sunrise_time,
     json_extract_scalar(raw_value, '$.sunset_time')                  AS sunset_time,
     -- Derived: fog alert flag
-    CASE WHEN (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) / 100.0 ELSE CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) END) > 0.6 THEN true ELSE false END AS is_fog_alert,
+    CASE WHEN (CASE WHEN json_extract_scalar(raw_value, '$.schema_version') IS NULL THEN
+            CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) / 100.0 ELSE
+            CAST(json_extract_scalar(raw_value, '$.fog_index') AS DOUBLE) END) > 0.6 THEN true ELSE
+            false END AS is_fog_alert,
     message_key,
     kafka_topic,
     kafka_partition,

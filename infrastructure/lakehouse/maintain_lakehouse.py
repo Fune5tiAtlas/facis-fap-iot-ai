@@ -16,6 +16,7 @@ MAX_SNAPSHOTS afterwards, so a regression shows up as a failed Job.
 
 Usage: python maintain_lakehouse.py --env-file /config/.env
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,9 @@ def parse_args() -> argparse.Namespace:
     # resolve_credentials() reads these too (mirrors the materializer parsers).
     ap.add_argument("--catalog", default=None)
     ap.add_argument("--s3-bucket", default=None)
-    ap.add_argument("--schemas", default="bronze,silver,gold", help="comma list of schemas to maintain")
+    ap.add_argument(
+        "--schemas", default="bronze,silver,gold", help="comma list of schemas to maintain"
+    )
     return ap.parse_args()
 
 
@@ -79,7 +82,9 @@ def maintain(conn, catalog: str, schema: str, table: str) -> bool:
         ok &= run(conn, f"ALTER TABLE {target} EXECUTE {proc}")
     snapshots = conn.execute(f'SELECT count(*) FROM "{catalog}".{schema}."{table}$snapshots"')[0][0]
     if snapshots > MAX_SNAPSHOTS:
-        logger.error("  %s.%s still has %d snapshots (limit %d)", schema, table, snapshots, MAX_SNAPSHOTS)
+        logger.error(
+            "  %s.%s still has %d snapshots (limit %d)", schema, table, snapshots, MAX_SNAPSHOTS
+        )
         ok = False
     logger.info("  %s %s.%s (%d snapshots)", "OK:" if ok else "FAILED:", schema, table, snapshots)
     return ok
@@ -90,7 +95,9 @@ def main() -> int:
     username, password, client_secret, keycloak_url, trino_host, trino_port, catalog, _ = (
         resolve_credentials(args)
     )
-    conn = AuthRefreshingSession(trino_host, trino_port, catalog, keycloak_url, username, password, client_secret)
+    conn = AuthRefreshingSession(
+        trino_host, trino_port, catalog, keycloak_url, username, password, client_secret
+    )
 
     total, failed = 0, 0
     for schema in [s.strip() for s in args.schemas.split(",") if s.strip() in RETENTION]:
