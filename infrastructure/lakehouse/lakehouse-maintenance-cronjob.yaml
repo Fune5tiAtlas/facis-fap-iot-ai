@@ -1,16 +1,17 @@
 # ---------------------------------------------------------------------------
-# Lakehouse maintenance CronJob — Iceberg compaction (NF-9, audit 2026-07-24)
+# Lakehouse maintenance CronJob — snapshot expiry + Iceberg compaction
 #
-# Runs maintain_lakehouse.py daily to OPTIMIZE (compact small data files) and
-# optimize_manifests on every silver + gold table, so the single-row-insert
-# ingest pattern (NiFi PutSQL to bronze; 10-min silver refresh) stops
-# accumulating thousands of tiny files that push Trino query p95 past the QA
-# thresholds. This is the standing remediation behind the one-off compaction
-# run in the audit; it keeps file counts bounded going forward.
+# Runs maintain_lakehouse.py daily on every bronze, silver and gold table:
+# expire_snapshots (bounds the table metadata), optimize (compacts small data
+# files) and optimize_manifests. Without the expiry, each commit grows the
+# table's metadata.json without limit, which is what exhausted the Trino
+# coordinator's heap in November 2026; without the compaction, the
+# single-row-insert ingest pattern pushes Trino query p95 past the QA
+# thresholds (NF-9, audit 2026-07-24).
 #
 # Prerequisites (same cluster secret the materializers use):
-#   1. Scripts ConfigMap (setup_lakehouse.py provides the connection + table
-#      registries that maintain_lakehouse.py imports):
+#   1. Scripts ConfigMap (setup_lakehouse.py provides the connection that
+#      maintain_lakehouse.py imports):
 #        kubectl create configmap facis-maintenance-scripts \
 #          --from-file=maintain_lakehouse.py=infrastructure/lakehouse/maintain_lakehouse.py \
 #          --from-file=setup_lakehouse.py=infrastructure/lakehouse/setup_lakehouse.py \
@@ -20,10 +21,8 @@
 #   2. Credentials secret facis-lakehouse-credentials (already created for the
 #      materializers).
 #
-# To also reclaim old files + shrink metadata history (expire_snapshots /
-# remove_orphan_files), lower the catalog's iceberg.expire-snapshots.min-retention
-# (Stackable TrinoCatalog CR, needs a Trino restart) and set
-# LAKEHOUSE_EXPIRE_SNAPSHOTS=true below.
+#   3. Catalog properties on the Stackable TrinoCatalog CR (see README.md,
+#      "Required catalog settings"); the job fails without them.
 # ---------------------------------------------------------------------------
 apiVersion: batch/v1
 kind: CronJob
@@ -34,7 +33,7 @@ metadata:
     app: facis-lakehouse-maintenance
     component: lakehouse
 spec:
-  # 03:15 daily — off-peak, after the 6-hourly gold cycle has settled.
+  # 03:15 daily — off-peak.
   schedule: "15 3 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -42,8 +41,8 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
-      # Compaction rewrites data files for ~21 tables; generous budget.
-      activeDeadlineSeconds: 3600
+      # ~33 tables; a pass after a long gap took ~20 min per gold table.
+      activeDeadlineSeconds: 10800
       template:
         metadata:
           labels:
@@ -80,9 +79,6 @@ spec:
             env:
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"
-            # Flip to "true" only after lowering the catalog min-retention.
-            - name: LAKEHOUSE_EXPIRE_SNAPSHOTS
-              value: "false"
             resources:
               requests:
                 cpu: 200m

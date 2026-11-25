@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # Silver Layer Materializer — Kubernetes CronJob
 #
-# Runs materialize_silver.py on a schedule to incrementally INSERT new
-# Bronze rows into Silver Iceberg tables.  Uses watermark tracking so
-# only rows newer than the last run are processed. This manifest is the
+# Runs materialize_silver.py on a schedule to MERGE new Bronze rows into
+# Silver Iceberg tables, keyed on (kafka_topic, kafka_partition,
+# kafka_offset) so each Kafka message lands exactly once. This manifest is the
 # single source of truth for the Silver materializer; the equivalent Helm
 # template in services/simulation/helm/facis-simulation is disabled by
 # default and deprecated in favour of this file.
@@ -36,7 +36,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
-      activeDeadlineSeconds: 540    # 9 min max (before next schedule)
+      # A normal run takes 2-3 min; the budget covers a catch-up after a stall.
+      # concurrencyPolicy: Forbid keeps a long run from overlapping the next.
+      activeDeadlineSeconds: 3600
       template:
         metadata:
           labels:

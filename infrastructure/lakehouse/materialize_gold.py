@@ -103,6 +103,24 @@ def _partition_expr(table_name: str) -> str:
     return f"ARRAY['day({col})']"
 
 
+# Old metadata.json copies are deleted on every commit (bounded metadata history).
+METADATA_PROPS = (
+    "extra_properties = MAP(ARRAY['write.metadata.delete-after-commit.enabled', "
+    "'write.metadata.previous-versions-max'], ARRAY['true', '10'])"
+)
+
+
+def replace_table_sql(conn, catalog: str, schema: str, table: str, select_sql: str) -> str:
+    """One atomic CREATE OR REPLACE TABLE ... AS, keeping the table's current
+    format/location/partitioning (a replace resets table properties)."""
+    ddl = execute(conn, f'SHOW CREATE TABLE "{catalog}".{schema}.{table}')[0][0]
+    with_clause = ddl[ddl.rindex("WITH ("):].rstrip().rstrip(")").rstrip()
+    return (
+        f'CREATE OR REPLACE TABLE "{catalog}".{schema}.{table}\n'
+        f"{with_clause},\n   {METADATA_PROPS}\n)\nAS\n{select_sql}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core materialization
 # ---------------------------------------------------------------------------
@@ -144,23 +162,18 @@ def create_gold_table(conn, catalog: str, table_name: str, s3_bucket: str, dry_r
 
 
 def refresh_gold_table(conn, catalog: str, table_name: str, s3_bucket: str, dry_run: bool) -> None:
-    """Full refresh: DELETE all rows then INSERT INTO from Silver."""
+    """Full refresh as ONE atomic replace: readers never see the table empty,
+    and a failure leaves the previous contents in place."""
     view_sql = GOLD_VIEWS[table_name].format(catalog=catalog)
-    select_sql = _extract_select(view_sql)
-
-    delete_sql = f'DELETE FROM "{catalog}".gold.{table_name} WHERE true'
-    insert_sql = f'INSERT INTO "{catalog}".gold.{table_name}\n{select_sql}'
+    sql = replace_table_sql(conn, catalog, "gold", table_name, _extract_select(view_sql))
 
     if dry_run:
         print(f"\n-- REFRESH gold.{table_name}")
-        print(delete_sql)
-        print(insert_sql)
+        print(sql)
         return
 
-    execute_ddl(conn, delete_sql, f"truncate gold.{table_name}")
-
     t0 = time.time()
-    execute(conn, insert_sql)
+    execute(conn, sql)
     elapsed = time.time() - t0
     logger.info(f"  Refreshed gold.{table_name} in {elapsed:.1f}s")
 
@@ -206,12 +219,20 @@ def materialize_all(
     logger.info(f"Materializing {len(target_tables)} Gold tables...")
 
     ok = 0
+    failed: set[str] = set()
     for table_name in target_tables:
         if table_name not in GOLD_VIEWS:
             logger.error(f"  Unknown table: {table_name}")
             continue
-        if materialize_table(conn, catalog, table_name, s3_bucket, dry_run):
+        # A gold table built from another gold table must not refresh from a stale input.
+        stale = [t for t in failed if f".gold.{t}" in GOLD_VIEWS[table_name]]
+        if stale:
+            logger.error(f"  SKIP: gold.{table_name} — depends on failed {stale}")
+            failed.add(table_name)
+        elif materialize_table(conn, catalog, table_name, s3_bucket, dry_run):
             ok += 1
+        else:
+            failed.add(table_name)
 
     print(f"\n  Materialized {ok}/{len(target_tables)} Gold tables.")
     if ok < len(target_tables):

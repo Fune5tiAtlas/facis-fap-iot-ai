@@ -27,22 +27,21 @@ metadata:
     app: facis-gold-materializer
     component: lakehouse
 spec:
-  # Every 6 hours at minute 30. Gold aggregations are full-refresh and
-  # cheap once silver is materialized; running more often would just churn
-  # the same rollups. Schedule chosen to land 25 min after the silver
-  # /10-min cycle, so a freshly-completed silver run feeds gold.
-  schedule: "30 */6 * * *"
+  # Hourly at minute 7. Each table is rebuilt with one atomic
+  # CREATE OR REPLACE TABLE ... AS, so readers never see a half-built table.
+  # Minute 7 lands between two silver runs (/10-min cycle).
+  schedule: "7 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1
-      # 30-min runtime budget. Gold has 12 tables; on first catch-up after
-      # a long stall they all rebuild full-refresh. The AuthRefreshingSession
-      # in setup_lakehouse.py auto-refreshes the OIDC token across the
-      # 5-min TTL boundary so this run can comfortably go past it.
-      activeDeadlineSeconds: 1800
+      # A normal run of the 12 tables takes ~5 min; the budget covers a
+      # catch-up after a long stall. The AuthRefreshingSession in
+      # setup_lakehouse.py auto-refreshes the OIDC token across the 5-min
+      # TTL boundary so this run can comfortably go past it.
+      activeDeadlineSeconds: 7200
       template:
         metadata:
           labels:

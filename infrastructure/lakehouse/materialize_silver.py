@@ -37,7 +37,6 @@ from setup_lakehouse import (
     SILVER_VIEWS,
     AuthRefreshingSession,
     execute,
-    execute_ddl,
     load_env_file,
     resolve_credentials,
 )
@@ -45,78 +44,22 @@ from setup_lakehouse import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("materialize_silver")
 
-# ---------------------------------------------------------------------------
-# Watermark management
-# ---------------------------------------------------------------------------
-
-WATERMARK_TABLE = "_watermarks"
-
-WATERMARK_DDL = """
-CREATE TABLE IF NOT EXISTS "{catalog}".silver._watermarks (
-    table_name       VARCHAR,
-    last_watermark   TIMESTAMP(6) WITH TIME ZONE,
-    updated_at       TIMESTAMP(6) WITH TIME ZONE
+# Old metadata.json copies are deleted on every commit (bounded metadata history).
+METADATA_PROPS = (
+    "extra_properties = MAP(ARRAY['write.metadata.delete-after-commit.enabled', "
+    "'write.metadata.previous-versions-max'], ARRAY['true', '10'])"
 )
-WITH (format = 'PARQUET', location = '{location}')
-"""
 
 
-def ensure_watermark_table(conn, catalog: str, s3_bucket: str) -> None:
-    location = f"s3a://{s3_bucket}/warehouse/silver.db/{WATERMARK_TABLE}"
-    sql = WATERMARK_DDL.format(catalog=catalog, location=location)
-    execute_ddl(conn, sql, "silver._watermarks table")
-
-
-def get_watermark(conn, catalog: str, table_name: str) -> str | None:
-    """Return the most recently recorded watermark timestamp for a table,
-    or None.  We pick the row with the latest `updated_at` because the
-    table is append-only (see update_watermark below) — multiple rows may
-    exist per table_name, oldest first."""
-    # table_name comes from the hardcoded SILVER_VIEWS dict — validated.
-    # Trino's python client does not support ? placeholder substitution
-    # against this Trino version, so we inline the validated identifier.
-    if table_name not in SILVER_VIEWS:
-        raise ValueError(f"Invalid table name: {table_name}")
-    rows = execute(
-        conn,
-        f'SELECT last_watermark FROM "{catalog}".silver._watermarks'
-        f" WHERE table_name = '{table_name}'"
-        f" ORDER BY updated_at DESC LIMIT 1",
+def replace_table_sql(conn, catalog: str, schema: str, table: str, select_sql: str) -> str:
+    """One atomic CREATE OR REPLACE TABLE ... AS, keeping the table's current
+    format/location/partitioning (a replace resets table properties)."""
+    ddl = execute(conn, f'SHOW CREATE TABLE "{catalog}".{schema}.{table}')[0][0]
+    with_clause = ddl[ddl.rindex("WITH ("):].rstrip().rstrip(")").rstrip()
+    return (
+        f'CREATE OR REPLACE TABLE "{catalog}".{schema}.{table}\n'
+        f"{with_clause},\n   {METADATA_PROPS}\n)\nAS\n{select_sql}"
     )
-    if rows and rows[0][0]:
-        return str(rows[0][0])
-    return None
-
-
-def update_watermark(conn, catalog: str, table_name: str) -> None:
-    """Set the watermark to the max ingestion_timestamp in the Silver table."""
-    if table_name not in SILVER_VIEWS:
-        raise ValueError(f"Invalid table name: {table_name}")
-    rows = execute(
-        conn,
-        f'SELECT MAX(ingestion_timestamp) FROM "{catalog}".silver.{table_name}',
-    )
-    if not rows or not rows[0][0]:
-        return
-    max_ts = str(rows[0][0])
-
-    # Append a new watermark row.  We deliberately DO NOT delete previous
-    # rows for this table_name: Iceberg's DELETE + INSERT in two separate
-    # statements creates a race where the INSERT's commit conflicts with
-    # the DELETE's positional-delete file (ICEBERG_COMMIT_ERROR: "Found
-    # new conflicting delete files that can apply to records matching
-    # ref(name=\"table_name\")...", observed 2026-05-05 on a backlog
-    # catch-up run).  Append-only sidesteps the race entirely; get_watermark
-    # picks the latest row via ORDER BY updated_at DESC LIMIT 1.  At
-    # 9 tables × every 10 minutes = ~50k rows/year — trivially small.
-    # table_name is validated against SILVER_VIEWS; max_ts is a TIMESTAMP
-    # literal from Trino's MAX().
-    execute(
-        conn,
-        f'INSERT INTO "{catalog}".silver._watermarks'
-        f" VALUES ('{table_name}', TIMESTAMP '{max_ts}', CURRENT_TIMESTAMP)",
-    )
-    logger.info("  Watermark for %s updated to %s", table_name, max_ts)
 
 
 # ---------------------------------------------------------------------------
@@ -142,21 +85,26 @@ def _extract_select(view_sql: str) -> str:
     return view_sql[idx + 4:]  # skip " AS\n" or " AS "
 
 
-def build_insert_sql(catalog: str, table: str, watermark: str | None) -> str:
-    """Build INSERT INTO silver.<table> SELECT … FROM bronze.<table>."""
-    view_sql = SILVER_VIEWS[table].format(catalog=catalog)
-    select_sql = _extract_select(view_sql)
+def build_select_sql(catalog: str, table: str, since: str | None) -> str:
+    """SELECT for silver.<table> over bronze, each Kafka message exactly once.
 
-    # Add watermark filter for incremental load
-    # NOTE: watermark comes from our own Trino watermark table (trusted internal value),
-    # and table comes from the hardcoded SILVER_VIEWS dict.  Trino does not support
-    # parameterized DDL identifiers, so table names are validated against SILVER_VIEWS.
-    if watermark:
-        # Append to existing WHERE clause
-        select_sql = select_sql.rstrip().rstrip(";")
-        select_sql += f"\n  AND ingestion_timestamp > TIMESTAMP '{watermark}'"
-
-    return f'INSERT INTO "{catalog}".silver.{table}\n{select_sql}'
+    Bronze can hold a message twice: NiFi re-inserts a batch whose commit
+    succeeded but was reported as failed. `since` limits the bronze scan to
+    one day before the newest row already in silver (partition pruning)."""
+    select_sql = _extract_select(SILVER_VIEWS[table].format(catalog=catalog)).rstrip().rstrip(";")
+    bronze = f'FROM "{catalog}".bronze.{table}\n'
+    if select_sql.count(bronze) != 1:
+        raise ValueError(f"silver.{table}: expected exactly one bronze source")
+    recent = f"\n      AND ingestion_timestamp > TIMESTAMP '{since}' - INTERVAL '1' DAY" if since else ""
+    dedup = (
+        "FROM (SELECT * FROM (\n"
+        "    SELECT b.*, ROW_NUMBER() OVER (\n"
+        "        PARTITION BY kafka_topic, kafka_partition, kafka_offset ORDER BY ingestion_timestamp) AS rn\n"
+        f'    FROM "{catalog}".bronze.{table} b\n'
+        f"    WHERE kafka_offset IS NOT NULL{recent}\n"
+        ") WHERE rn = 1)\n"
+    )
+    return select_sql.replace(bronze, dedup)
 
 
 # ---------------------------------------------------------------------------
@@ -167,40 +115,48 @@ def build_insert_sql(catalog: str, table: str, watermark: str | None) -> str:
 def materialize_table(
     conn, catalog: str, table: str, full_refresh: bool, dry_run: bool
 ) -> bool:
-    """Materialize a single Silver table. Returns True on success."""
-    watermark = None if full_refresh else get_watermark(conn, catalog, table)
-
-    if watermark:
-        logger.info(f"  {table}: incremental from {watermark}")
-    else:
-        logger.info(f"  {table}: full refresh")
-
-    sql = build_insert_sql(catalog, table, watermark)
-
-    if dry_run:
-        print(f"\n-- DRY RUN: {table}")
-        print(sql)
-        print()
-        return True
-
-    # For full refresh, delete existing data first
-    if full_refresh:
-        execute_ddl(conn, f'DELETE FROM "{catalog}".silver.{table} WHERE true', f"truncate silver.{table}")
-
+    """Materialize a single Silver table in ONE atomic statement. Returns True on success."""
+    target = f'"{catalog}".silver.{table}'
     try:
+        since = None
+        if not full_refresh:
+            rows = execute(conn, f"SELECT MAX(ingestion_timestamp) FROM {target}")
+            since = str(rows[0][0]) if rows and rows[0][0] else None
+        select_sql = build_select_sql(catalog, table, since)
+
+        if since:
+            # Insert-only MERGE on the Kafka coordinates: re-runs and late or
+            # replayed bronze rows can neither duplicate nor be skipped.
+            logger.info(f"  {table}: merging bronze rows since {since} - 1 day")
+            cols = [r[0] for r in execute(
+                conn,
+                f'SELECT column_name FROM "{catalog}".information_schema.columns '
+                f"WHERE table_schema = 'silver' AND table_name = '{table}' ORDER BY ordinal_position",
+            )]
+            sql = (
+                f"MERGE INTO {target} t\nUSING (\n{select_sql}\n) s\n"
+                "ON t.kafka_topic = s.kafka_topic AND t.kafka_partition = s.kafka_partition"
+                " AND t.kafka_offset = s.kafka_offset\n"
+                f"WHEN NOT MATCHED THEN INSERT ({', '.join(cols)})\n"
+                f"VALUES ({', '.join('s.' + c for c in cols)})"
+            )
+        else:
+            logger.info(f"  {table}: full refresh")
+            sql = replace_table_sql(conn, catalog, "silver", table, select_sql)
+
+        if dry_run:
+            print(f"\n-- DRY RUN: {table}")
+            print(sql)
+            print()
+            return True
+
         t0 = time.time()
-        rows = execute(conn, sql)
-        elapsed = time.time() - t0
-        logger.info(f"  OK: silver.{table} — {elapsed:.1f}s")
+        execute(conn, sql)
+        logger.info(f"  OK: silver.{table} — {time.time() - t0:.1f}s")
+        return True
     except Exception as e:
         logger.error(f"  FAIL: silver.{table} — {e}")
         return False
-
-    # Update watermark
-    if not dry_run:
-        update_watermark(conn, catalog, table)
-
-    return True
 
 
 def materialize_all(
@@ -208,8 +164,6 @@ def materialize_all(
     full_refresh: bool, dry_run: bool,
 ) -> None:
     """Materialize Silver tables."""
-    ensure_watermark_table(conn, catalog, s3_bucket)
-
     target_tables = tables if tables else list(SILVER_VIEWS.keys())
     logger.info(f"Materializing {len(target_tables)} Silver tables...")
 
@@ -251,7 +205,7 @@ def main() -> None:
     print()
     print("=" * 72)
     print("  Silver Layer Materialization")
-    print("  Incremental INSERT INTO silver.* FROM bronze.*")
+    print("  Incremental MERGE INTO silver.* FROM bronze.*")
     print("=" * 72)
 
     username, password, client_secret, keycloak_url, trino_host, trino_port, catalog, s3_bucket = (
