@@ -90,7 +90,16 @@ def build_select_sql(catalog: str, table: str, since: str | None) -> str:
 
     Bronze can hold a message twice: NiFi re-inserts a batch whose commit
     succeeded but was reported as failed. `since` limits the bronze scan to
-    one day before the newest row already in silver (partition pruning)."""
+    one day before the newest row already in silver (partition pruning).
+
+    The look-back is safe because bronze.ingestion_timestamp is Trino's
+    CURRENT_TIMESTAMP of the INSERT that wrote the row, so a row can become
+    visible at most one query run-time (query.max-run-time, 1h) after its
+    timestamp. A bronze writer that back-dates rows by a day or more would
+    need a --full-refresh.
+
+    Rows without full Kafka coordinates are left out: a NULL never equals
+    itself in the MERGE key, so such a row would be inserted again each run."""
     select_sql = _extract_select(SILVER_VIEWS[table].format(catalog=catalog)).rstrip().rstrip(";")
     bronze = f'FROM "{catalog}".bronze.{table}\n'
     if select_sql.count(bronze) != 1:
@@ -104,7 +113,8 @@ def build_select_sql(catalog: str, table: str, since: str | None) -> str:
         "        PARTITION BY kafka_topic, kafka_partition, kafka_offset"
         " ORDER BY ingestion_timestamp) AS rn\n"
         f'    FROM "{catalog}".bronze.{table} b\n'
-        f"    WHERE kafka_offset IS NOT NULL{recent}\n"
+        "    WHERE kafka_topic IS NOT NULL AND kafka_partition IS NOT NULL"
+        f" AND kafka_offset IS NOT NULL{recent}\n"
         ") WHERE rn = 1)\n"
     )
     return select_sql.replace(bronze, dedup)

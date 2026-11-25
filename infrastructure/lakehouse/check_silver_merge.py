@@ -1,12 +1,14 @@
 """Check against a live Trino: the silver load is exactly-once per Kafka message.
 
-Creates and drops the throwaway tables bronze.zz_t and silver.zz_t, and covers a
-duplicate in bronze, a re-run, the replay of an old offset and a late row.
+Creates and drops the throwaway tables bronze.zz_t and silver.zz_t (it refuses to
+start if either already exists), and covers a duplicate in bronze, a re-run, the
+replay of an old offset and a late row.
 
 Usage: python infrastructure/lakehouse/check_silver_merge.py --env-file .env.cluster
 """
 
 import argparse
+import sys
 
 import materialize_silver as m
 from setup_lakehouse import AuthRefreshingSession, execute, resolve_credentials
@@ -45,7 +47,13 @@ def load_and_expect(rows: int, label: str, full_refresh: bool = False) -> None:
     print(f"{label}: {got}")
 
 
-drop_tables()
+existing = execute(
+    conn,
+    f'SELECT table_schema FROM "{cat}".information_schema.tables '
+    "WHERE table_name = 'zz_t' AND table_schema IN ('bronze', 'silver')",
+)
+if existing:
+    sys.exit(f"zz_t already exists in {sorted(r[0] for r in existing)}; not touching it.")
 execute(
     conn,
     f"CREATE TABLE {BRONZE} (ingestion_timestamp TIMESTAMP(6) WITH TIME ZONE, "
